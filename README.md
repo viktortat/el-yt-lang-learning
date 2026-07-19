@@ -1,46 +1,70 @@
 # YT Lang Learning
 
-Десктопное приложение для изучения языков по роликам YouTube. Оно позволяет вести библиотеку роликов, смотреть видео с английскими и русскими субтитрами, отмечать изученные фразы, сохранять позицию воспроизведения и получать или создавать субтитры.
+English | [Русский](README.ru.md)
 
-## Требования
+Turn YouTube videos into focused language lessons. YT Lang Learning keeps the video, English captions, and Russian translation in one window, so you can follow real speech without jumping between a player and a translator.
 
-- Windows
-- [Bun](https://bun.sh/)
-- Node.js — используется для запуска тестов
+![YT Lang Learning study player with English and Russian captions](Docs/screens/study-player.png)
 
-Для функций транскрибации дополнительно настраиваются пути к `uv`, `yt-dlp`, Python и скрипту транскрибации в разделе «Настройки» приложения.
+## What you can do
 
-## Запуск
+- Organise YouTube lessons into folders and move them as your study plan changes.
+- Click any caption to seek to that line, repeat the current phrase, skip five seconds, or change playback speed.
+- Load available English captions, create a Russian translation through OpenRouter, or use local faster-whisper transcription when YouTube has no English track.
 
-```powershell
-bun install
-bun run start
-```
+The app remembers the playback position for each YouTube video. Caption files, settings, and the library stay on the local machine.
 
-## Проверка
+## Install and run
 
-```powershell
-bun run test
-```
+Release builds created by this repository use the installer name `yt-lang-learning-setup.exe` and also provide a ZIP package.
 
-## Сборка Windows
+### Installer
 
-```powershell
-bun run package
-bun run make
-```
+1. Run `yt-lang-learning-setup.exe`.
+2. Complete the installer and open YT Lang Learning.
 
-После упаковки исполняемый файл находится в `out\yt-lang-learning-win32-x64\yt-lang-learning.exe`. Установщик создаётся в `out\make\squirrel.windows\x64\yt-lang-learning-setup.exe`.
+### ZIP package
 
-Подробности — в [BUILDING-WINDOWS.md](BUILDING-WINDOWS.md).
+1. Extract the whole archive into its own folder.
+2. Run `yt-lang-learning.exe` from that folder.
 
-## Структура проекта
+Do not copy the executable away from the rest of the package. See the [technical documentation](Docs/README.md) if you need to run or build the app from source.
 
-- `main.js` — главный процесс Electron, IPC и работа с библиотекой, настройками и субтитрами.
-- `preload.js` — безопасный API, доступный интерфейсу.
-- `index.html`, `app.js`, `app.css` — интерфейс приложения.
-- `caption-*.js`, `player-*.js`, `playback-position.js`, `transcription-plan.js` — изолированная логика и её тесты.
-- `library.json`, `settings.json`, `captions/` — начальные или переносимые данные приложения.
-- `assets/` — иконки и другие ресурсы.
+## Start your first lesson
 
-В режиме разработки данные читаются из папки проекта. В собранном приложении они размещаются рядом с исполняемым файлом.
+1. Open **БИБЛИОТЕКА**.
+2. Select **＋ РОЛИК**, paste a full YouTube URL, and give the lesson a clear name.
+3. Double-click the saved video to open it in the player.
+4. Select **ЗАГРУЗИТЬ EN** and confirm the request to YouTube.
+5. Add an OpenRouter API key in settings if you want a Russian translation, then select **ПЕРЕВЕСТИ RU**.
+
+You can also paste a URL directly into **ПЛЕЕР** and watch it before adding it to the library.
+
+![YT Lang Learning library](Docs/screens/library.png)
+
+## Study modes
+
+**КОЛОНКИ** places English captions on the left and Russian captions on the right. The active line is highlighted in both panels.
+
+**ЦЕНТР** puts the current English line and translation near the video. The EN and RU controls can hide either side panel when you want more space for playback.
+
+## Translation and transcription
+
+Russian translation requires an OpenRouter API key. The app sends the English caption text to the selected OpenRouter model; it does not send the video for translation. Windows stores the key only when system encryption is available.
+
+If YouTube does not provide an English caption track, the app can offer local speech recognition. This requires an existing faster-whisper model, `uv`, and `yt-dlp`. The temporary video download starts only after confirmation and is removed after processing.
+
+![YT Lang Learning settings](Docs/screens/settings.png)
+
+## Limits
+
+- YouTube playback and caption downloads require an internet connection.
+- Videos may fail to play when their owner blocks embedding.
+- English captions depend on the tracks YouTube makes available. Local transcription needs separate tools and a downloaded model.
+- Russian translation needs an OpenRouter account, API key, and access to the selected model.
+
+## Documentation and licence
+
+- [User guide in Russian](Docs/guide-users.md)
+- [Technical documentation](Docs/README.md)
+- Licence: MIT
