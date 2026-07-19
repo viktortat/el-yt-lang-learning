@@ -6,6 +6,15 @@ Turn YouTube videos into focused language lessons. YT Lang Learning keeps the vi
 
 ![YT Lang Learning study player with English and Russian captions](Docs/screens/study-player.png)
 
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="Docs/screens/library.png" alt="YT Lang Learning library with a saved lesson"></td>
+    <td><img src="Docs/screens/settings.png" alt="YT Lang Learning translation and transcription settings"></td>
+  </tr>
+</table>
+
 ## What you can do
 
 - Organise YouTube lessons into folders and move them as your study plan changes.
@@ -40,8 +49,6 @@ Do not copy the executable away from the rest of the package. See the [technical
 
 You can also paste a URL directly into **ПЛЕЕР** and watch it before adding it to the library.
 
-![YT Lang Learning library](Docs/screens/library.png)
-
 ## Study modes
 
 **КОЛОНКИ** places English captions on the left and Russian captions on the right. The active line is highlighted in both panels.
@@ -53,8 +60,6 @@ You can also paste a URL directly into **ПЛЕЕР** and watch it before adding
 Russian translation requires an OpenRouter API key. The app sends the English caption text to the selected OpenRouter model; it does not send the video for translation. Windows stores the key only when system encryption is available.
 
 If YouTube does not provide an English caption track, the app can offer local speech recognition. This requires an existing faster-whisper model, `uv`, and `yt-dlp`. The temporary video download starts only after confirmation and is removed after processing.
-
-![YT Lang Learning settings](Docs/screens/settings.png)
 
 ## Limits
 
