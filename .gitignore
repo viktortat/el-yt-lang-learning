@@ -1,0 +1,5 @@
+node_modules/
+out/
+.bun-tmp/
+.electron-user-data/
+captions/

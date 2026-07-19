@@ -1,0 +1,28 @@
+{
+  "name": "yt-lang-learning",
+  "version": "0.0.15",
+  "description": "Приложение для изучения языков по YouTube-видео.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron-forge start",
+    "test": "node --test caption-sync.test.js caption-parser.test.js player-controls.test.js player-layout.test.js playback-position.test.js transcription-plan.test.js wiring.test.js",
+    "package": "electron-forge package",
+    "make": "electron-forge make"
+  },
+  "author": "vik",
+  "license": "MIT",
+  "overrides": {
+    "yauzl": "3.4.0"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.4.0",
+    "@electron-forge/maker-squirrel": "^7.4.0",
+    "@electron-forge/maker-zip": "^7.4.0",
+    "@electron/packager": "18.4.4",
+    "electron": "^30.5.1",
+    "yauzl": "3.4.0"
+  },
+  "dependencies": {
+    "electron-squirrel-startup": "^1.0.1"
+  }
+}

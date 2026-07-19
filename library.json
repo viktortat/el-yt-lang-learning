@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "root": {
+    "id": "root",
+    "type": "folder",
+    "name": "Моя библиотека",
+    "children": [
+      {
+        "id": "video-mrrwk9o2-n8nwr",
+        "type": "video",
+        "name": "A real conversation in easy English about hair 💇‍♀️💈: Real Easy English",
+        "url": "https://www.youtube.com/watch?v=n0rrgJ4MGdY",
+        "createdAt": "2026-07-19T14:40:13.298Z",
+        "progress": {
+          "studied": 0,
+          "position": 0
+        }
+      }
+    ]
+  }
+}

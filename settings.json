@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "theme": "dark",
+  "translation": {
+    "provider": "openrouter",
+    "model": "google/gemini-2.5-flash-lite",
+    "encryptedApiKey": "djEwcC5ahDKyJ/LWMnw4VRS0kUfLumTJg8janKuMvxdaezEo51WpENdcNzifrt7jewmVkZOvvyCjPtQFoxg/UC9RhG3DWAffaN/ugaDyE0SY9cb6oII1YMuMi8LcFKtoVAx1+3LJhIo=",
+    "hasApiKey": false
+  },
+  "transcription": {
+    "modelRoot": "C:\\Users\\viktor\\.cache\\ai-models\\faster-whisper",
+    "model": "large-v3-turbo",
+    "uvPath": "uv",
+    "ytDlpPath": "yt-dlp"
+  }
+}
