@@ -25,6 +25,14 @@ test("every rendered button id has a renderer binding", () => {
   assert.deepEqual(unbound, []);
 });
 
+test("adding a video uses the app dialog instead of unsupported browser prompts", () => {
+  const start = appSource.indexOf("function createVideo()");
+  const end = appSource.indexOf("async function importPlaylistVideos", start);
+  const createVideoSource = appSource.slice(start, end);
+  assert.match(createVideoSource, /dialog\.id = "videoDialog"/);
+  assert.doesNotMatch(createVideoSource, /prompt\(/);
+});
+
 test("renderer has no placeholder markers", () => {
   assert.doesNotMatch(appSource, /TODO|FIXME|заглушк|станет доступен/i);
 });

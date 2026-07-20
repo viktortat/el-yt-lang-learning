@@ -224,6 +224,54 @@ async function runYtDlp(args, cwd, onOutput = () => {}) {
   }
 }
 
+function runCapture(command, args, cwd) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      windowsHide: true,
+      env: { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONUNBUFFERED: "1" }
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", chunk => { stdout += chunk.toString(); });
+    child.stderr.on("data", chunk => { stderr += chunk.toString(); });
+    child.on("error", reject);
+    child.on("close", code => code === 0 ? resolve(stdout) : reject(new Error(stderr.trim() || `${command} завершился с кодом ${code}`)));
+  });
+}
+
+async function runYtDlpCapture(args, cwd) {
+  try {
+    return await runCapture(settings.transcription.ytDlpPath, args, cwd);
+  } catch (error) {
+    if (error.code !== "ENOENT" || settings.transcription.ytDlpPath !== "yt-dlp") throw error;
+    return runCapture("python", ["-m", "yt_dlp", ...args], cwd);
+  }
+}
+
+async function playlistVideos(url) {
+  const playlistUrl = normalizeYoutubePlaylistUrl(url);
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "ytll-playlist-"));
+  try {
+    const output = await runYtDlpCapture([
+      "--flat-playlist", "--dump-single-json", "--skip-download", "--no-warnings", playlistUrl
+    ], temporaryDirectory);
+    const entries = JSON.parse(output).entries || [];
+    const seen = new Set();
+    return entries.flatMap(entry => {
+      const id = String(entry?.id || "");
+      if (!/^[\w-]{11}$/.test(id) || seen.has(id)) return [];
+      seen.add(id);
+      return [{ id, name: String(entry.title || "Новый урок").trim() || "Новый урок", url: `https://www.youtube.com/watch?v=${id}` }];
+    });
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new Error("Не удалось прочитать список роликов плейлиста.");
+    throw error;
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
 function seconds(value) {
   const [hours, minutes, rest] = value.trim().replace(",", ".").split(":");
   return Number(hours) * 3600 + Number(minutes) * 60 + Number(rest);
@@ -500,6 +548,7 @@ if (require("electron-squirrel-startup")) {
       await shell.openExternal(playlistUrl);
       return { url: playlistUrl };
     });
+    ipcMain.handle("youtube:playlist-videos", async (_event, url) => playlistVideos(url));
     ipcMain.handle("youtube:open-external", async (_event, url) => {
       const youtubeUrl = normalizeYoutubeUrl(url);
       await shell.openExternal(youtubeUrl);

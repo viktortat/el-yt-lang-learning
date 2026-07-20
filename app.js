@@ -65,11 +65,14 @@
     chevronLeft: '<path d="m15 6-6 6 6 6"/>',
     chevronDown: '<path d="m6 9 6 6 6-6"/>',
     library: '<path class="icon-fill" d="M4 7.5h16v11H4z"/><path d="M6 4.5h12M3.5 7.5h17v11h-17z"/><path d="M8 11.5h8"/>',
+    libraryPlus: '<path class="icon-fill" d="M4 5h12v14H4z"/><path d="M7 3h12v14H7M4 5h12v14H4zM14 17v5m-2.5-2.5h5"/>',
+    listPlus: '<path d="M5 6h10M5 10h10M5 14h6M18 15v6m-3-3h6"/>',
     folder: '<path class="icon-fill" d="M3 7.5h7l1.7 2H21v9H3z"/><path d="M3 18.5v-12h6l2 2H21v10z"/>',
     folderOpen: '<path class="icon-fill" d="M3.5 9h17l-2 9H2z"/><path d="M3 8.5v-2h6l2 2h10l-2.3 10H2.5z"/><path d="M3.5 9h17"/>',
     video: '<rect class="icon-fill" x="3" y="5" width="18" height="14" rx="3"/><rect x="3" y="5" width="18" height="14" rx="3"/><path class="icon-solid" d="m10 9 5 3-5 3z"/>',
     folderPlus: '<path class="icon-fill" d="M3 8h7l1.7 2H21v9H3z"/><path d="M3 18.5v-12h6l2 2H21v10z"/><path d="M12 12v4m-2-2h4"/>',
     videoPlus: '<rect class="icon-fill" x="3" y="5" width="18" height="14" rx="3"/><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M12 9v6m-3-3h6"/>',
+    circlePlus: '<circle cx="12" cy="12" r="8.5"/><path d="M12 8v8m-4-4h8"/>',
     import: '<path d="M12 3.5v11M8 10.5l4 4 4-4"/><path d="M4 15.5v4h16v-4"/>',
     export: '<path d="M12 14.5v-11M8 7.5l4-4 4 4"/><path d="M4 15.5v4h16v-4"/>',
     restore: '<path d="M5 8.5V4.5M5 4.5h4"/><path d="M5.5 5.5A8 8 0 1 1 4 14"/><path d="M12 8v4l2.5 1.5"/>',
@@ -107,7 +110,7 @@
 
   function shell(content) {
     const info = state.info || {};
-    return `<section class="shell"><header class="topbar"><div class="brand"><span class="brand-mark">YT</span><span>LANG LEARNING</span></div><nav class="tabs" aria-label="Разделы"><button class="tab ${state.activeTab === "library" ? "active" : ""}" data-tab="library">БИБЛИОТЕКА</button><button class="tab ${state.activeTab === "player" ? "active" : ""}" data-tab="player">ПЛЕЕР</button></nav><div class="top-actions"><button class="icon-button" id="addVideoTop" title="Добавить ролик" aria-label="Добавить ролик">${icon("videoPlus")}</button><button class="icon-button" data-tab="settings" title="Настройки" aria-label="Настройки">⚙</button></div></header>${content}<footer class="statusbar"><b>v${escapeHtml(info.version || "?")}</b> · переносная библиотека · ${escapeHtml(info.dataDirectory || "")}</footer></section>`;
+    return `<section class="shell"><header class="topbar"><div class="brand"><span class="brand-mark">YT</span><span>LANG LEARNING</span></div><nav class="tabs" aria-label="Разделы"><button class="tab ${state.activeTab === "library" ? "active" : ""}" data-tab="library">БИБЛИОТЕКА</button><button class="tab ${state.activeTab === "player" ? "active" : ""}" data-tab="player">ПЛЕЕР</button></nav><div class="top-actions"><button class="icon-button" id="addVideoTop" title="Добавить ролик" aria-label="Добавить ролик">${icon("circlePlus")}</button><button class="icon-button" data-tab="settings" title="Настройки" aria-label="Настройки">⚙</button></div></header>${content}<footer class="statusbar"><b>v${escapeHtml(info.version || "?")}</b> · переносная библиотека · ${escapeHtml(info.dataDirectory || "")}</footer></section>`;
   }
 
   function renderTreeNode(node, depth = 0) {
@@ -130,9 +133,9 @@
   }
 
   function renderFolderInspector(folder) {
-    if (folder.id === "root") return `<div class="inspector-empty"><strong>Соберите свой учебный маршрут</strong><p>Создайте папку для темы или добавьте YouTube-ролик. Двойной клик откроет ролик в плеере.</p><button class="primary" id="newVideoEmpty">Добавить первый ролик</button></div>`;
+    if (folder.id === "root") return `<div class="inspector-empty"><img class="empty-app-icon" src="assets/yt-lang-learning.ico" alt="" /><strong>Соберите свой учебный маршрут</strong><p>Создайте папку для темы или добавьте YouTube-ролик. Двойной клик откроет ролик в плеере.</p><button class="primary" id="newVideoEmpty">Добавить первый ролик</button></div>`;
     const videos = directChildren(folder).length;
-    return `<header class="inspector-header"><div><p class="eyebrow">Папка</p><h1 class="view-title">${escapeHtml(folder.name)}</h1></div><span class="node-chip">${videos} роликов</span></header><form class="form folder-form" id="folderForm"><label class="field">YouTube-плейлист<div class="playlist-input"><input name="playlistUrl" value="${escapeHtml(folder.playlistUrl || "")}" placeholder="https://www.youtube.com/watch?v=…&list=…" autocomplete="off" /><button class="subtle-button folder-action" type="button" id="openPlaylist" title="Открыть плейлист в браузере" aria-label="Открыть плейлист в браузере">${icon("externalLink")}</button></div></label><p class="hint">Ссылка сохраняется только для этой папки.</p><div class="form-actions"><button class="primary folder-action" type="submit" title="Сохранить ссылку" aria-label="Сохранить ссылку">${icon("save")}</button><button class="subtle-button folder-action" type="button" data-action="rename" title="Переименовать" aria-label="Переименовать">${icon("edit")}</button><button class="subtle-button folder-action" type="button" data-action="add-video" title="Добавить ролик" aria-label="Добавить ролик">${icon("videoPlus")}</button><button class="subtle-button danger folder-action" type="button" data-action="delete" title="Удалить" aria-label="Удалить">${icon("trash")}</button></div></form>`;
+    return `<header class="inspector-header"><div><p class="eyebrow">Папка</p><h1 class="view-title">${escapeHtml(folder.name)}</h1></div><span class="node-chip">${videos} роликов</span></header><form class="form folder-form" id="folderForm"><label class="field">YouTube-плейлист<div class="playlist-input"><input name="playlistUrl" value="${escapeHtml(folder.playlistUrl || "")}" placeholder="https://www.youtube.com/watch?v=…&list=…" autocomplete="off" /><button class="subtle-button folder-action" type="button" id="openPlaylist" title="Открыть плейлист в браузере" aria-label="Открыть плейлист в браузере">${icon("externalLink")}</button></div></label><p class="hint">Ссылка сохраняется только для этой папки.</p><label class="field">Добавить ролики из плейлиста<div class="playlist-input"><input name="importPlaylistUrl" placeholder="https://www.youtube.com/playlist?list=…" autocomplete="off" /><button class="primary playlist-import-button" type="button" id="importPlaylistVideos">Добавить</button></div></label><p class="hint">Поле используется только для загрузки списка роликов; ссылка не сохраняется.</p><div class="form-actions"><button class="primary folder-action" type="submit" title="Сохранить ссылку" aria-label="Сохранить ссылку">${icon("save")}</button><button class="subtle-button folder-action" type="button" data-action="rename" title="Переименовать" aria-label="Переименовать">${icon("edit")}</button><button class="subtle-button folder-action" type="button" data-action="add-video" title="Добавить ролик" aria-label="Добавить ролик">${icon("videoPlus")}</button><button class="subtle-button danger folder-action" type="button" data-action="delete" title="Удалить" aria-label="Удалить">${icon("trash")}</button></div></form>`;
   }
 
   function renderVideoInspector(video) {
@@ -168,7 +171,7 @@
     const toolButton = (className, attributes, iconName, label) => `<button class="${className}" ${attributes} title="${label}" aria-label="${label}">${icon(iconName)}</button>`;
     const actions = id ? `${toolButton("mode-button", 'id="loadEnglish"', "download", "Загрузить английские субтитры")}${toolButton(`mode-button ${translationReady ? "" : "needs-key"}`, 'id="translateRussian"', "translate", translationReady ? "Перевести на русский" : "Настроить ключ OpenRouter")}` : "";
     const playbackControls = `${toolButton("control", 'data-player="back"', "back", "Назад на 5 секунд")}${toolButton("control", 'data-player="play"', "play", "Воспроизвести или поставить на паузу")}${toolButton("control", 'data-player="forward"', "forward", "Вперёд на 5 секунд")}<span class="controls-divider" aria-hidden="true"></span>${toolButton("control", 'data-player="previous"', "previous", "Повторить предыдущую реплику")}${toolButton("control", 'data-player="repeat"', "repeat", "Повторить текущую реплику")}`;
-    return shell(`<section class="view player-view ${mode === "center" ? "center-mode" : ""}"><header class="player-head"><div class="player-url">${url}</div><form class="player-link-form" id="playerLinkForm"><input name="url" value="${url}" placeholder="Вставьте YouTube-ссылку…" autocomplete="off" />${toolButton("subtle-button", 'type="submit"', "play", "Открыть ролик")}${toolButton("primary", 'type="button" id="addRootVideo"', "videoPlus", "Сохранить ролик в библиотеку")}</form><div class="layout-actions">${actions}</div></header><section class="learning-stage"><aside class="caption-panel ${state.layout.english ? "" : "collapsed"}"><header class="caption-head">English <span>${state.captions.english.length}</span></header><div class="caption-list">${captionsMarkup(state.captions.english, "en")}</div></aside><section class="video-zone"><h1 class="player-title">${title}</h1>${player}<div class="center-captions"><b>${state.captions.english[0]?.text || "Субтитры по центру"}</b>${state.captions.russian[0]?.text || "Загрузите английскую дорожку и создайте перевод."}</div><nav class="study-controls" aria-label="Управление просмотром">${playbackControls}<span class="controls-divider" aria-hidden="true"></span>${["0.5","0.75","1","1.5","2"].map(rate => `<button class="control rate-control ${rate === "1" ? "active" : ""}" data-rate="${rate}" aria-label="Скорость ${rate}">${rate}×</button>`).join("")}</nav></section><aside class="caption-panel ${state.layout.russian ? "" : "collapsed"}"><header class="caption-head">Русский <span>${state.captions.russian.length}</span></header><div class="caption-list">${captionsMarkup(state.captions.russian, "ru")}</div></aside></section></section>`);
+    return shell(`<section class="view player-view ${mode === "center" ? "center-mode" : ""}"><header class="player-head"><div class="player-url">${url}</div><form class="player-link-form" id="playerLinkForm"><input name="url" value="${url}" placeholder="Вставьте YouTube-ссылку…" autocomplete="off" />${toolButton("subtle-button", 'type="submit"', "play", "Открыть ролик")}${toolButton("primary", 'type="button" id="addRootVideo"', "listPlus", "Сохранить ролик в библиотеку")}</form><div class="layout-actions">${actions}</div></header><section class="learning-stage"><aside class="caption-panel ${state.layout.english ? "" : "collapsed"}"><header class="caption-head">English <span>${state.captions.english.length}</span></header><div class="caption-list">${captionsMarkup(state.captions.english, "en")}</div></aside><section class="video-zone"><h1 class="player-title">${title}</h1>${player}<div class="center-captions"><b>${state.captions.english[0]?.text || "Субтитры по центру"}</b>${state.captions.russian[0]?.text || "Загрузите английскую дорожку и создайте перевод."}</div><nav class="study-controls" aria-label="Управление просмотром">${playbackControls}<span class="controls-divider" aria-hidden="true"></span>${["0.5","0.75","1","1.5","2"].map(rate => `<button class="control rate-control ${rate === "1" ? "active" : ""}" data-rate="${rate}" aria-label="Скорость ${rate}">${rate}×</button>`).join("")}</nav></section><aside class="caption-panel ${state.layout.russian ? "" : "collapsed"}"><header class="caption-head">Русский <span>${state.captions.russian.length}</span></header><div class="caption-list">${captionsMarkup(state.captions.russian, "ru")}</div></aside></section></section>`);
   }
   function renderSettings() {
     const s = state.settings; const t = s.translation; const tr = s.transcription;
@@ -494,6 +497,25 @@
     const cleanUrl = url?.trim();
     const targetYoutubeId = youtubeId(cleanUrl);
     if (!targetYoutubeId) { showToast("Вставьте корректную YouTube-ссылку"); return; }
+    let existingVideo;
+    walk(state.library.root, node => {
+      if (node.type === "video" && youtubeId(node.url) === targetYoutubeId) {
+        existingVideo = node;
+        return false;
+      }
+    });
+    if (existingVideo) {
+      let parent = findParent(existingVideo.id);
+      while (parent) {
+        state.expanded.add(parent.id);
+        parent = findParent(parent.id);
+      }
+      state.selectedId = existingVideo.id;
+      state.activeTab = "library";
+      render();
+      showToast("Этот ролик уже есть в библиотеке");
+      return;
+    }
     const captionsToKeep = targetYoutubeId === activeYoutubeId() ? clone(state.captions) : emptyCaptions();
     const video = { id: newId("video"), type: "video", name: "Новый урок", url: cleanUrl, createdAt: new Date().toISOString(), progress: { studied: 0, position: 0 } };
     state.library.root.children.push(video);
@@ -554,7 +576,68 @@
     document.body.append(dialog);
     input.focus();
   }
-  async function createVideo() { const url = prompt("Вставьте YouTube URL:"); if (!url?.trim()) return; const name = prompt("Название ролика:", "Новый урок") || "Новый урок"; const folder = targetFolder(); folder.children ||= []; const video = { id: newId("video"), type: "video", name: name.trim(), url: url.trim(), createdAt: new Date().toISOString(), progress: { studied: 0, position: 0 } }; folder.children.push(video); await saveLibrary(); state.selectedId = video.id; render(); }
+  function closeVideoDialog() { document.querySelector("#videoDialog")?.remove(); }
+  function createVideo() {
+    if (document.querySelector("#videoDialog")) return;
+    const dialog = document.createElement("div");
+    dialog.className = "dialog-backdrop";
+    dialog.id = "videoDialog";
+    dialog.innerHTML = `<form class="dialog-card" aria-labelledby="videoDialogTitle"><h2 id="videoDialogTitle">Новый ролик</h2><label class="field">YouTube URL<input name="url" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off" required /></label><label class="field">Название<input name="name" value="Новый урок" autocomplete="off" required /></label><div class="form-actions"><button class="subtle-button" type="button" data-dialog-cancel>Отмена</button><button class="primary" type="submit">Добавить</button></div></form>`;
+    const form = dialog.querySelector("form");
+    const urlInput = form.elements.url;
+    dialog.addEventListener("click", event => { if (event.target === dialog) closeVideoDialog(); });
+    dialog.querySelector("[data-dialog-cancel]").addEventListener("click", closeVideoDialog);
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const url = urlInput.value.trim();
+      const name = form.elements.name.value.trim();
+      if (!youtubeId(url)) { urlInput.focus(); return showToast("Вставьте корректную YouTube-ссылку"); }
+      if (!name) { form.elements.name.focus(); return; }
+      const folder = targetFolder();
+      folder.children ||= [];
+      const video = { id: newId("video"), type: "video", name, url, createdAt: new Date().toISOString(), progress: { studied: 0, position: 0 } };
+      folder.children.push(video);
+      try {
+        await saveLibrary();
+        state.selectedId = video.id;
+        state.expanded.add(folder.id);
+        closeVideoDialog();
+        render();
+      } catch (error) {
+        folder.children = folder.children.filter(item => item !== video);
+        showToast(`Не удалось добавить ролик: ${error.message}`);
+      }
+    });
+    document.body.append(dialog);
+    urlInput.focus();
+  }
+  async function importPlaylistVideos() {
+    const input = document.querySelector('#folderForm [name="importPlaylistUrl"]');
+    const url = input?.value.trim();
+    if (!url) return showToast("Вставьте ссылку на плейлист YouTube");
+    const button = document.querySelector("#importPlaylistVideos");
+    button.disabled = true;
+    button.textContent = "Поиск…";
+    try {
+      const entries = await window.appAPI.getPlaylistVideos(url);
+      const knownIds = new Set();
+      walk(state.library.root, node => { if (node.type === "video") knownIds.add(youtubeId(node.url)); });
+      const newEntries = entries.filter(entry => !knownIds.has(entry.id));
+      if (!newEntries.length) return showToast(entries.length ? "Все ролики из плейлиста уже есть в библиотеке" : "В плейлисте нет доступных роликов");
+      if (!confirm(`Добавить ${newEntries.length} роликов из плейлиста в папку «${selected().name}»?`)) return;
+      const folder = selected();
+      folder.children ||= [];
+      folder.children.push(...newEntries.map(entry => ({ id: newId("video"), type: "video", name: entry.name, url: entry.url, createdAt: new Date().toISOString(), progress: { studied: 0, position: 0 } })));
+      state.expanded.add(folder.id);
+      await saveLibrary();
+      render();
+      showToast(`Добавлено роликов: ${newEntries.length}${entries.length > newEntries.length ? `, пропущено: ${entries.length - newEntries.length}` : ""}`);
+    } catch (error) {
+      showToast(`Не удалось добавить ролики: ${error.message}`);
+    } finally {
+      if (button?.isConnected) { button.disabled = false; button.textContent = "Добавить"; }
+    }
+  }
   async function renameSelected() { const node = selected(); if (node.id === "root") return; const name = prompt("Новое название:", node.name); if (!name?.trim()) return; node.name = name.trim(); await saveLibrary(); render(); }
   async function deleteSelected() { const node = selected(); if (node.id === "root") return; if (!confirm(`Удалить «${node.name}» из библиотеки?`)) return; const parent = findParent(node.id); parent.children = parent.children.filter(child => child.id !== node.id); state.selectedId = parent.id; if (state.playerVideoId === node.id) state.playerVideoId = null; await saveLibrary(); render(); }
   async function exportLibrary() { try { const result = await window.appAPI.exportLibrary(); if (!result.canceled) showToast("Библиотека экспортирована"); } catch (error) { showToast(`Не удалось экспортировать библиотеку: ${error.message}`); } }
@@ -583,6 +666,7 @@
     document.querySelectorAll("[data-action]").forEach(button => button.addEventListener("click", () => { const action = button.dataset.action; if (action === "rename") renameSelected(); if (action === "delete") deleteSelected(); if (action === "add-video") createVideo(); }));
     document.querySelector("#folderForm")?.addEventListener("submit", async event => { event.preventDefault(); const folder = selected(); folder.playlistUrl = new FormData(event.currentTarget).get("playlistUrl").trim(); await saveLibrary(); showToast("Ссылка на плейлист сохранена"); render(); });
     document.querySelector("#openPlaylist")?.addEventListener("click", async () => { const url = document.querySelector("#folderForm [name=playlistUrl]").value.trim(); if (!url) return showToast("Вставьте ссылку на плейлист YouTube"); try { await window.appAPI.openPlaylist(url); } catch (error) { showToast(error.message); } });
+    document.querySelector("#importPlaylistVideos")?.addEventListener("click", importPlaylistVideos);
     document.querySelector("#videoForm")?.addEventListener("submit", async event => { event.preventDefault(); const data = new FormData(event.currentTarget); const video = selected(); video.name = data.get("name").trim(); video.url = data.get("url").trim(); await saveLibrary(); showToast("Свойства ролика сохранены"); render(); }); document.querySelector("#openPlayer")?.addEventListener("click", () => openPlayer(selected()));
     document.querySelector("#openYoutube")?.addEventListener("click", async () => { const url = document.querySelector("#videoForm [name=url]").value.trim(); if (!url) return showToast("Вставьте ссылку на YouTube"); try { await window.appAPI.openYoutube(url); } catch (error) { showToast(error.message); } });
     document.querySelector("#playerLinkForm")?.addEventListener("submit", event => { event.preventDefault(); playUrl(new FormData(event.currentTarget).get("url")); });

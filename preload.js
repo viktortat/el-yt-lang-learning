@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("appAPI", {
   importLibrary: () => ipcRenderer.invoke("library:import"),
   restoreLatestLibraryBackup: () => ipcRenderer.invoke("library:restore-latest-backup"),
   openPlaylist: url => ipcRenderer.invoke("youtube:open-playlist", url),
+  getPlaylistVideos: url => ipcRenderer.invoke("youtube:playlist-videos", url),
   openYoutube: url => ipcRenderer.invoke("youtube:open-external", url),
   openOpenRouterApiKeys: () => ipcRenderer.invoke("openrouter:open-api-keys"),
   getCaptions: videoId => ipcRenderer.invoke("captions:get", videoId),
