@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } = require("electron");
 const http = require("http");
 const path = require("path");
 const os = require("os");
@@ -28,8 +28,10 @@ function dataDirectory() {
 }
 
 function libraryPath() { return path.join(dataDirectory(), "library.json"); }
+function defaultLibraryPath() { return path.join(__dirname, "default.ytll-library.json"); }
 function settingsPath() { return path.join(dataDirectory(), "settings.json"); }
 function captionsPath(videoId) { return path.join(dataDirectory(), "captions", `${videoId}.json`); }
+function backupsDirectory() { return path.join(dataDirectory(), "library-backups"); }
 function diagnosticPath() { return path.join(app.getPath("userData"), "renderer-debug.log"); }
 function logDiagnostic(message) { appendFile(diagnosticPath(), `${new Date().toISOString()} ${message}\n`).catch(() => {}); }
 
@@ -60,6 +62,9 @@ function defaultSettings() {
       ytDlpPath: "yt-dlp",
       pythonPath: "C:\\Python314\\python.exe",
       scriptPath: "C:\\Users\\viktor\\.codex\\skills\\transcribe-local-video\\scripts\\transcribe.py"
+    },
+    onboarding: {
+      defaultLibraryOfferEnabled: true
     }
   };
 }
@@ -89,11 +94,17 @@ function normalizeYoutubeUrl(value) {
 
 function normalizeSettings(value) {
   const defaults = defaultSettings();
+  const onboarding = value?.onboarding || {};
   return {
     ...defaults,
     ...value,
     translation: { ...defaults.translation, ...(value && value.translation) },
-    transcription: { ...defaults.transcription, ...(value && value.transcription) }
+    transcription: { ...defaults.transcription, ...(value && value.transcription) },
+    onboarding: {
+      ...defaults.onboarding,
+      ...onboarding,
+      defaultLibraryOfferEnabled: onboarding.defaultLibraryOfferEnabled ?? !onboarding.defaultLibraryOfferHandled
+    }
   };
 }
 
@@ -130,6 +141,64 @@ async function loadCaptions(videoId) {
   return captions;
 }
 async function saveCaptions(videoId, captions) { await writeJson(captionsPath(videoId), captions); return captions; }
+
+function videoIds(sourceLibrary) {
+  const ids = new Set();
+  const visit = node => {
+    if (!node || typeof node !== "object") return;
+    if (node.type === "video") ids.add(node.id);
+    for (const child of Array.isArray(node.children) ? node.children : []) visit(child);
+  };
+  visit(sourceLibrary?.root);
+  return ids;
+}
+
+function validateLibraryTree(node) {
+  if (!node || typeof node !== "object" || !["folder", "video"].includes(node.type) || typeof node.name !== "string" || !/^[A-Za-z0-9_-]+$/.test(node.id)) return false;
+  return node.type !== "folder" || (Array.isArray(node.children) && node.children.every(validateLibraryTree));
+}
+
+async function libraryBundle(sourceLibrary = library) {
+  const captions = {};
+  for (const videoId of videoIds(sourceLibrary)) captions[videoId] = await loadCaptions(videoId);
+  return { format: "yt-lang-learning-library", version: 1, library: sourceLibrary, captions };
+}
+
+function normalizeLibraryBundle(value) {
+  if (!value || value.format !== "yt-lang-learning-library" || value.version !== 1 || !validateLibraryTree(value.library?.root)) {
+    throw new Error("Выберите корректный файл экспорта библиотеки YT Lang Learning");
+  }
+  const nextLibrary = normalizeLibrary(value.library);
+  const captions = {};
+  for (const videoId of videoIds(nextLibrary)) {
+    const item = value.captions?.[videoId] || defaultCaptions();
+    captions[videoId] = { version: 1, english: Array.isArray(item.english) ? item.english : [], russian: Array.isArray(item.russian) ? item.russian : [], studiedIds: Array.isArray(item.studiedIds) ? item.studiedIds : [] };
+  }
+  return { library: nextLibrary, captions };
+}
+
+function isLibraryEmpty(sourceLibrary = library) {
+  return !Array.isArray(sourceLibrary?.root?.children) || sourceLibrary.root.children.length === 0;
+}
+
+async function saveBackup() {
+  await mkdir(backupsDirectory(), { recursive: true });
+  const fileName = `library-${new Date().toISOString().replace(/[:.]/g, "-")}.ytll-library.json`;
+  await writeJson(path.join(backupsDirectory(), fileName), await libraryBundle());
+  const backups = (await readdir(backupsDirectory())).filter(name => name.endsWith(".ytll-library.json")).sort().reverse();
+  for (const outdated of backups.slice(3)) await rm(path.join(backupsDirectory(), outdated));
+}
+
+async function replaceLibraryFromBundle(bundle) {
+  const next = normalizeLibraryBundle(bundle);
+  for (const [videoId, captions] of Object.entries(next.captions)) await saveCaptions(videoId, captions);
+  const oldVideoIds = videoIds(library);
+  const nextVideoIds = videoIds(next.library);
+  await writeJson(libraryPath(), next.library);
+  library = next.library;
+  await Promise.all([...oldVideoIds].filter(videoId => !nextVideoIds.has(videoId)).map(videoId => rm(captionsPath(videoId), { force: true })));
+  return library;
+}
 
 function run(command, args, cwd, onOutput = () => {}) {
   return new Promise((resolve, reject) => {
@@ -436,11 +505,46 @@ if (require("electron-squirrel-startup")) {
       await shell.openExternal(youtubeUrl);
       return { url: youtubeUrl };
     });
+    ipcMain.handle("openrouter:open-api-keys", async () => {
+      const url = "https://openrouter.ai/workspaces/default/keys";
+      await shell.openExternal(url);
+      return { url };
+    });
     ipcMain.handle("library:get", () => library);
     ipcMain.handle("library:save", async (_event, nextLibrary) => {
       library = normalizeLibrary(nextLibrary);
       await writeJson(libraryPath(), library);
       return library;
+    });
+    ipcMain.handle("library:handle-empty-default", async (_event, shouldPopulate) => {
+      if (!isLibraryEmpty() || !settings.onboarding.defaultLibraryOfferEnabled) return { handled: false, library };
+      settings.onboarding.defaultLibraryOfferEnabled = false;
+      await writeJson(settingsPath(), settings);
+      if (!shouldPopulate) return { handled: true, library };
+      const bundle = JSON.parse(await readFile(defaultLibraryPath(), "utf8"));
+      return { handled: true, library: await replaceLibraryFromBundle(bundle) };
+    });
+    ipcMain.handle("library:export", async () => {
+      const result = await dialog.showSaveDialog(mainWindow, { title: "Экспорт библиотеки", defaultPath: "Моя библиотека.ytll-library.json", filters: [{ name: "Библиотека YT Lang Learning", extensions: ["json"] }] });
+      if (result.canceled || !result.filePath) return { canceled: true };
+      await writeJson(result.filePath, await libraryBundle());
+      return { filePath: result.filePath };
+    });
+    ipcMain.handle("library:import", async () => {
+      const result = await dialog.showOpenDialog(mainWindow, { title: "Импорт библиотеки", properties: ["openFile"], filters: [{ name: "Библиотека YT Lang Learning", extensions: ["json"] }] });
+      if (result.canceled || !result.filePaths[0]) return { canceled: true };
+      const imported = JSON.parse(await readFile(result.filePaths[0], "utf8"));
+      normalizeLibraryBundle(imported);
+      await saveBackup();
+      return { library: await replaceLibraryFromBundle(imported) };
+    });
+    ipcMain.handle("library:restore-latest-backup", async () => {
+      let backups;
+      try { backups = (await readdir(backupsDirectory())).filter(name => name.endsWith(".ytll-library.json")).sort().reverse(); }
+      catch (error) { if (error.code === "ENOENT") backups = []; else throw error; }
+      if (!backups.length) return { restored: false };
+      const backup = JSON.parse(await readFile(path.join(backupsDirectory(), backups[0]), "utf8"));
+      return { restored: true, library: await replaceLibraryFromBundle(backup) };
     });
     ipcMain.handle("captions:get", (_event, videoId) => loadCaptions(videoId));
     ipcMain.handle("captions:save", (_event, videoId, captions) => saveCaptions(videoId, {

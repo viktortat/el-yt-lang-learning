@@ -88,44 +88,27 @@
                   "studied": 0,
                   "position": 0
                 }
+              },
+              {
+                "id": "video-mrt39xxq-84ku5",
+                "type": "video",
+                "name": "Learn English Conversation through Oxford English video - Beginner Levels",
+                "url": "https://www.youtube.com/watch?v=Uat46hipx48",
+                "createdAt": "2026-07-20T10:35:55.022Z",
+                "progress": {
+                  "studied": 0,
+                  "position": 0
+                }
               }
-            ]
-          }
-        ]
-      },
-      {
-        "id": "video-mrsywysm-1diij",
-        "type": "video",
-        "name": "Are you following your dreams? ⏲️ 6 Minute English",
-        "url": "https://www.youtube.com/watch?v=26PrgjTboVQ",
-        "createdAt": "2026-07-20T08:33:51.142Z",
-        "progress": {
-          "studied": 0,
-          "position": 0
-        }
-      },
-      {
-        "id": "folder-mrszmwoq-me8y3",
-        "type": "folder",
-        "name": "TED",
-        "children": [
-          {
-            "id": "video-mrszml53-oammv",
-            "type": "video",
-            "name": "The Case for Making Art in a Crisis | Yiyun Kang | TED",
-            "url": "https://www.youtube.com/watch?v=WY-jr1m3xq8",
-            "createdAt": "2026-07-20T08:53:46.503Z",
-            "progress": {
-              "studied": 0,
-              "position": 0
-            }
+            ],
+            "playlistUrl": "https://www.youtube.com/playlist?list=PLnVI9JDrMzHhNOmF8LnBJEXwX-sgC_Ruk"
           },
           {
-            "id": "video-mrszocmf-6btu8",
+            "id": "video-mrt349qc-xlu8p",
             "type": "video",
-            "name": "Welcome to My AI Surrealist World | David Szauder | TED",
-            "url": "https://www.youtube.com/watch?v=GTCZz_QWBKs",
-            "createdAt": "2026-07-20T08:55:08.775Z",
+            "name": "Nick's new motorbike act goes drastically wrong 😬 | My Family - BBC",
+            "url": "https://www.youtube.com/watch?v=twiuyI1uM7o",
+            "createdAt": "2026-07-20T10:31:30.372Z",
             "progress": {
               "studied": 0,
               "position": 0
@@ -194,6 +177,65 @@
           }
         ],
         "playlistUrl": "https://www.youtube.com/playlist?list=PLcetZ6gSk9692J5Mq2pY4siPVbMCu4v6c"
+      },
+      {
+        "id": "video-mrsywysm-1diij",
+        "type": "video",
+        "name": "Are you following your dreams? ⏲️ 6 Minute English",
+        "url": "https://www.youtube.com/watch?v=26PrgjTboVQ",
+        "createdAt": "2026-07-20T08:33:51.142Z",
+        "progress": {
+          "studied": 0,
+          "position": 0
+        }
+      },
+      {
+        "id": "folder-mrt2onkn-of1km",
+        "type": "folder",
+        "name": "Word on the Street",
+        "children": [
+          {
+            "id": "video-mrt2nlvw-gtgki",
+            "type": "video",
+            "name": "Stephen’s BIG MISTAKE! 🧼 The Art Disaster You Have to See! | Art Scene 2",
+            "url": "https://www.youtube.com/watch?v=mSSOw1w8R_4",
+            "createdAt": "2026-07-20T10:18:32.972Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          }
+        ],
+        "playlistUrl": "https://www.youtube.com/playlist?list=PLRRbILmU38fnKVZ4QgBtOgSY2OvbeGbFR"
+      },
+      {
+        "id": "folder-mrszmwoq-me8y3",
+        "type": "folder",
+        "name": "TED",
+        "children": [
+          {
+            "id": "video-mrszml53-oammv",
+            "type": "video",
+            "name": "The Case for Making Art in a Crisis | Yiyun Kang | TED",
+            "url": "https://www.youtube.com/watch?v=WY-jr1m3xq8",
+            "createdAt": "2026-07-20T08:53:46.503Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mrszocmf-6btu8",
+            "type": "video",
+            "name": "Welcome to My AI Surrealist World | David Szauder | TED",
+            "url": "https://www.youtube.com/watch?v=GTCZz_QWBKs",
+            "createdAt": "2026-07-20T08:55:08.775Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          }
+        ]
       }
     ]
   }
