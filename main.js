@@ -79,6 +79,14 @@ function normalizeYoutubePlaylistUrl(value) {
   return url.toString();
 }
 
+function normalizeYoutubeUrl(value) {
+  const url = new URL(String(value || "").trim());
+  const hostname = url.hostname.toLowerCase();
+  const isYoutube = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be", "www.youtu.be"].includes(hostname);
+  if (url.protocol !== "https:" || !isYoutube) throw new Error("Укажите ссылку на YouTube");
+  return url.toString();
+}
+
 function normalizeSettings(value) {
   const defaults = defaultSettings();
   return {
@@ -422,6 +430,11 @@ if (require("electron-squirrel-startup")) {
       const playlistUrl = normalizeYoutubePlaylistUrl(url);
       await shell.openExternal(playlistUrl);
       return { url: playlistUrl };
+    });
+    ipcMain.handle("youtube:open-external", async (_event, url) => {
+      const youtubeUrl = normalizeYoutubeUrl(url);
+      await shell.openExternal(youtubeUrl);
+      return { url: youtubeUrl };
     });
     ipcMain.handle("library:get", () => library);
     ipcMain.handle("library:save", async (_event, nextLibrary) => {

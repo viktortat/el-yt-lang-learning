@@ -175,6 +175,25 @@
             ]
           }
         ]
+      },
+      {
+        "id": "folder-mrt1xj4v-mw95a",
+        "type": "folder",
+        "name": "The English We Speak - BOX SETS",
+        "children": [
+          {
+            "id": "video-mrt1wm0g-j8i6h",
+            "type": "video",
+            "name": "BOX SET: English vocabulary mega-class! Learn 10 English 'food and drink' expressions in 25 minutes!",
+            "url": "https://www.youtube.com/watch?v=82sD-Wll9wg",
+            "createdAt": "2026-07-20T09:57:33.424Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          }
+        ],
+        "playlistUrl": "https://www.youtube.com/playlist?list=PLcetZ6gSk9692J5Mq2pY4siPVbMCu4v6c"
       }
     ]
   }

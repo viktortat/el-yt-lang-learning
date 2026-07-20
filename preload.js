@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("appAPI", {
   getLibrary: () => ipcRenderer.invoke("library:get"),
   saveLibrary: library => ipcRenderer.invoke("library:save", library),
   openPlaylist: url => ipcRenderer.invoke("youtube:open-playlist", url),
+  openYoutube: url => ipcRenderer.invoke("youtube:open-external", url),
   getCaptions: videoId => ipcRenderer.invoke("captions:get", videoId),
   saveCaptions: (videoId, captions) => ipcRenderer.invoke("captions:save", videoId, captions),
   downloadEnglishCaptions: payload => ipcRenderer.invoke("captions:download-english", payload),
