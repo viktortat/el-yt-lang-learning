@@ -6,7 +6,7 @@ module.exports = {
     ignore: [
       /node_modules\/electron\/dist/,
       /\.git/,
-      /out/,
+      /(^|[\\/])out([\\/]|$)/,
       /(^|[\\/])\.electron-user-data([\\/]|$)/,
       /(^|[\\/])\.bun-tmp([\\/]|$)/,
       /bun\.lock/,

@@ -1,11 +1,11 @@
 {
   "name": "yt-lang-learning",
-  "version": "0.0.15",
+  "version": "0.0.20",
   "description": "Приложение для изучения языков по YouTube-видео.",
   "main": "main.js",
   "scripts": {
     "start": "electron-forge start",
-    "test": "node --test caption-sync.test.js caption-parser.test.js player-controls.test.js player-layout.test.js playback-position.test.js transcription-plan.test.js wiring.test.js",
+    "test": "node --test caption-sync.test.js caption-parser.test.js player-controls.test.js player-layout.test.js playback-position.test.js transcription-plan.test.js translation-response.test.js wiring.test.js",
     "package": "electron-forge package",
     "make": "electron-forge make"
   },

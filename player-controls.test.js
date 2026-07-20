@@ -19,7 +19,7 @@ function fakePlayer({ time = 20, state = 2 } = {}) {
 test("every rendered player command is implemented and no repeat placeholder remains", () => {
   const source = readFileSync(require.resolve("./app.js"), "utf8");
   const rendered = [...source.matchAll(/data-player="([^"]+)"/g)].map(match => match[1]);
-  assert.deepEqual([...new Set(rendered)].sort(), ["back", "forward", "play", "repeat"]);
+  assert.deepEqual([...new Set(rendered)].sort(), ["back", "forward", "play", "previous", "repeat"]);
   assert.ok(rendered.every(command => SUPPORTED_COMMANDS.includes(command)));
   assert.doesNotMatch(source, /Повтор.+станет доступен/);
 });
@@ -67,8 +67,17 @@ test("repeat reports missing subtitles without moving playback", () => {
   assert.deepEqual(player.calls, []);
 });
 
+test("previous moves to the preceding caption and starts playback", () => {
+  const player = fakePlayer({ time: 188 });
+  const captions = [{ id: "a", start: 181 }, { id: "b", start: 186 }, { id: "c", start: 191 }];
+  const result = execute({ player, command: "previous", captions });
+  assert.equal(result.ok, true);
+  assert.equal(result.caption.id, "a");
+  assert.deepEqual(player.calls, [["seek", 181, true], ["play"]]);
+});
+
 test("all displayed playback rates are passed to YouTube", () => {
-  for (const rate of [0.5, 0.75, 1, 1.25, 1.5, 2]) {
+  for (const rate of [0.5, 0.75, 1, 1.5, 2]) {
     const player = fakePlayer();
     assert.equal(execute({ player, command: "rate", value: rate }).ok, true);
     assert.deepEqual(player.calls, [["rate", rate]]);

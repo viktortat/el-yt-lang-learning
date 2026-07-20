@@ -1,10 +1,12 @@
-const { app, BrowserWindow, ipcMain, safeStorage, session } = require("electron");
+const { app, BrowserWindow, ipcMain, safeStorage, shell } = require("electron");
+const http = require("http");
 const path = require("path");
 const os = require("os");
 const { spawn } = require("child_process");
-const { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } = require("fs/promises");
-const { downloadVideoArgs, transcriberArgs, captionsFromTranscript, hasVtt, chooseEnglishVtt } = require("./transcription-plan");
+const { appendFile, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } = require("fs/promises");
+const { downloadVideoArgs, transcriberArgs, captionsFromTranscript, hasVtt, chooseEnglishVtt, createProgressParser } = require("./transcription-plan");
 const { normalizeCaptionSegments } = require("./caption-parser");
+const { translationsFromModel } = require("./translation-response");
 
 const APP_NAME = "YT Lang Learning";
 const APP_VERSION = app.getVersion();
@@ -13,6 +15,7 @@ const APP_TITLE = `${APP_NAME} v${APP_VERSION}`;
 let mainWindow;
 let library;
 let settings;
+let rendererServer;
 const captionJobs = new Map();
 
 app.setPath(
@@ -27,6 +30,8 @@ function dataDirectory() {
 function libraryPath() { return path.join(dataDirectory(), "library.json"); }
 function settingsPath() { return path.join(dataDirectory(), "settings.json"); }
 function captionsPath(videoId) { return path.join(dataDirectory(), "captions", `${videoId}.json`); }
+function diagnosticPath() { return path.join(app.getPath("userData"), "renderer-debug.log"); }
+function logDiagnostic(message) { appendFile(diagnosticPath(), `${new Date().toISOString()} ${message}\n`).catch(() => {}); }
 
 function newId(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -62,6 +67,16 @@ function defaultSettings() {
 function normalizeLibrary(value) {
   if (!value || !value.root || value.root.type !== "folder") return defaultLibrary();
   return { version: 1, root: value.root };
+}
+
+function normalizeYoutubePlaylistUrl(value) {
+  const url = new URL(String(value || "").trim());
+  const hostname = url.hostname.toLowerCase();
+  const isYoutube = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"].includes(hostname);
+  if (url.protocol !== "https:" || !isYoutube || !url.searchParams.get("list")) {
+    throw new Error("Укажите ссылку на плейлист YouTube");
+  }
+  return url.toString();
 }
 
 function normalizeSettings(value) {
@@ -108,22 +123,27 @@ async function loadCaptions(videoId) {
 }
 async function saveCaptions(videoId, captions) { await writeJson(captionsPath(videoId), captions); return captions; }
 
-function run(command, args, cwd) {
+function run(command, args, cwd, onOutput = () => {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, windowsHide: true });
+    const child = spawn(command, args, {
+      cwd,
+      windowsHide: true,
+      env: { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONUNBUFFERED: "1" }
+    });
     let stderr = "";
-    child.stderr.on("data", chunk => { stderr += chunk.toString(); });
+    child.stdout.on("data", chunk => onOutput(chunk.toString()));
+    child.stderr.on("data", chunk => { const output = chunk.toString(); stderr += output; onOutput(output); });
     child.on("error", error => reject(error));
     child.on("close", code => code === 0 ? resolve() : reject(new Error(stderr.trim() || `${command} завершился с кодом ${code}`)));
   });
 }
 
-async function runYtDlp(args, cwd) {
+async function runYtDlp(args, cwd, onOutput = () => {}) {
   try {
-    await run(settings.transcription.ytDlpPath, args, cwd);
+    await run(settings.transcription.ytDlpPath, args, cwd, onOutput);
   } catch (error) {
     if (error.code !== "ENOENT" || settings.transcription.ytDlpPath !== "yt-dlp") throw error;
-    await run("python", ["-m", "yt_dlp", ...args], cwd);
+    await run("python", ["-m", "yt_dlp", ...args], cwd, onOutput);
   }
 }
 
@@ -183,18 +203,30 @@ async function downloadEnglishCaptions({ videoId, url }) {
   }
 }
 
-async function transcribeEnglishCaptions({ videoId, url }) {
+async function transcribeEnglishCaptions({ videoId, url }, onProgress = () => {}) {
   const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "ytll-whisper-"));
   try {
     const sourceTemplate = path.join(temporaryDirectory, "source.%(ext)s");
-    await runYtDlp(downloadVideoArgs(sourceTemplate, url), temporaryDirectory);
+    const parseDownloadProgress = createProgressParser("download");
+    await runYtDlp(downloadVideoArgs(sourceTemplate, url), temporaryDirectory, output => {
+      for (const percent of parseDownloadProgress(output)) onProgress({ videoId, stage: "download", percent });
+    });
     const downloadedFiles = await readdir(temporaryDirectory);
     const sourceFile = downloadedFiles.find(file => /\.(mp4|mkv|webm|mov|m4v)$/i.test(file));
     if (!sourceFile) throw new Error("Не удалось скачать временное видео для локального распознавания.");
 
     const inputPath = path.join(temporaryDirectory, sourceFile);
     const outputDirectory = path.join(temporaryDirectory, "results");
-    await run(settings.transcription.uvPath, transcriberArgs(settings.transcription, inputPath, outputDirectory), temporaryDirectory);
+    const parseTranscriptionProgress = createProgressParser("transcription");
+    onProgress({ videoId, stage: "transcription-start", percent: 0 });
+    await run(
+      settings.transcription.uvPath,
+      transcriberArgs(settings.transcription, inputPath, outputDirectory),
+      temporaryDirectory,
+      output => {
+        for (const percent of parseTranscriptionProgress(output)) onProgress({ videoId, stage: "transcription", percent });
+      }
+    );
 
     const transcriptDirectory = path.join(outputDirectory, `${path.parse(sourceFile).name}_transcript`);
     const transcriptPath = path.join(transcriptDirectory, `${path.parse(sourceFile).name}.json`);
@@ -218,12 +250,6 @@ function oncePerCaptionJob(key, factory) {
   return job;
 }
 
-function jsonFromModel(value) {
-  const candidate = value.match(/\[[\s\S]*\]/)?.[0];
-  if (!candidate) throw new Error("Модель не вернула JSON-перевод.");
-  return JSON.parse(candidate);
-}
-
 async function translateCaptions(videoId, onProgress = () => {}) {
   if (!settings.translation.encryptedApiKey) throw new Error("В настройках не указан ключ OpenRouter.");
   const apiKey = safeStorage.decryptString(Buffer.from(settings.translation.encryptedApiKey, "base64"));
@@ -231,25 +257,51 @@ async function translateCaptions(videoId, onProgress = () => {}) {
   if (!captions.english.length) throw new Error("Сначала загрузите английские субтитры.");
   captions.english = normalizeCaptionSegments(captions.english);
   const russian = [];
-  for (let offset = 0; offset < captions.english.length; offset += 50) {
-    const batch = captions.english.slice(offset, offset + 50);
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      signal: AbortSignal.timeout(90000),
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "X-OpenRouter-Title": APP_NAME },
-      body: JSON.stringify({ model: settings.translation.model, temperature: 0.2, messages: [
-        { role: "system", content: "Переводи английские субтитры на естественный русский. Верни только JSON-массив объектов {id,text}; сохрани все id и не добавляй пояснений." },
-        { role: "user", content: JSON.stringify(batch.map(item => ({ id: item.id, text: item.text }))) }
-      ] })
-    });
-    if (!response.ok) throw new Error(`OpenRouter ответил с кодом ${response.status}.`);
-    const payload = await response.json();
-    const translated = jsonFromModel(payload.choices?.[0]?.message?.content || "");
-    const byId = new Map(translated.map(item => [item.id, item.text]));
+  for (let offset = 0; offset < captions.english.length; offset += 25) {
+    const batch = captions.english.slice(offset, offset + 25);
+    const translatedById = new Map();
+    let missing = batch;
+    for (let attempt = 0; attempt < 3 && missing.length; attempt += 1) {
+      const requested = missing;
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        signal: AbortSignal.timeout(90000),
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "X-OpenRouter-Title": APP_NAME },
+        body: JSON.stringify({ model: settings.translation.model, temperature: 0.2, max_tokens: 8192,
+          plugins: [{ id: "response-healing" }],
+          response_format: { type: "json_schema", json_schema: { name: "caption_translations", strict: true, schema: {
+            type: "object", additionalProperties: false, required: ["translations"], properties: {
+              translations: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "text"], properties: {
+                id: { type: "string" }, text: { type: "string" }
+              } } }
+            }
+          } } },
+          messages: [
+            { role: "system", content: "Переводи английские субтитры на естественный русский. Верни JSON-объект с полем translations — массивом объектов {id,text}; верни перевод для каждой переданной реплики и сохрани все id." },
+            { role: "user", content: JSON.stringify(requested.map(item => ({ id: item.id, text: item.text }))) }
+          ]
+        })
+      });
+      if (!response.ok) throw new Error(`OpenRouter ответил с кодом ${response.status}.`);
+      const payload = await response.json();
+      let translated;
+      try {
+        translated = translationsFromModel(payload.choices?.[0]?.message?.content);
+      } catch (error) {
+        if (attempt < 2) continue;
+        const reason = payload.choices?.[0]?.finish_reason;
+        throw new Error(`${error.message}${reason ? ` Причина завершения: ${reason}.` : ""}`);
+      }
+      const requestedIds = new Set(requested.map(item => item.id));
+      for (const item of translated) {
+        const text = String(item?.text || "").trim();
+        if (requestedIds.has(item?.id) && text) translatedById.set(item.id, text);
+      }
+      missing = batch.filter(item => !translatedById.has(item.id));
+    }
+    if (missing.length) throw new Error(`OpenRouter не перевёл реплики: ${missing.map(item => item.id).join(", ")}.`);
     for (const item of batch) {
-      const text = String(byId.get(item.id) || "").trim();
-      if (!text) throw new Error(`OpenRouter не перевёл реплику ${item.id}.`);
-      russian.push({ ...item, text });
+      russian.push({ ...item, text: translatedById.get(item.id) });
     }
     captions.russian = [...russian];
     await saveCaptions(videoId, captions);
@@ -279,7 +331,38 @@ function storeSettings(next, submittedApiKey) {
   return normalized;
 }
 
-function createWindow() {
+function contentType(filePath) {
+  const extension = path.extname(filePath).toLowerCase();
+  return { ".css": "text/css", ".html": "text/html", ".ico": "image/x-icon", ".js": "text/javascript", ".json": "application/json", ".png": "image/png", ".svg": "image/svg+xml" }[extension] || "application/octet-stream";
+}
+
+async function startRendererServer() {
+  if (rendererServer) return rendererServer.url;
+  const root = path.resolve(__dirname);
+  rendererServer = http.createServer(async (request, response) => {
+    try {
+      const pathname = decodeURIComponent(new URL(request.url, "http://127.0.0.1").pathname);
+      const relativePath = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+      const filePath = path.resolve(root, relativePath);
+      if (filePath !== root && !filePath.startsWith(`${root}${path.sep}`)) throw new Error("Недопустимый путь");
+      response.writeHead(200, { "Content-Type": contentType(filePath), "Cache-Control": "no-store" });
+      response.end(await readFile(filePath));
+    } catch (error) {
+      logDiagnostic(`HTTP ${request.url}: ${error.message}`);
+      response.writeHead(404, { "Content-Type": "text/plain" });
+      response.end("Не найдено");
+    }
+  });
+  await new Promise((resolve, reject) => {
+    rendererServer.once("error", reject);
+    rendererServer.listen(0, "127.0.0.1", resolve);
+  });
+  const address = rendererServer.address();
+  rendererServer.url = `http://127.0.0.1:${address.port}/index.html`;
+  return rendererServer.url;
+}
+
+async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -300,11 +383,18 @@ function createWindow() {
     mainWindow.setTitle(APP_TITLE);
   });
   mainWindow.setTitle(APP_TITLE);
-  // Локальные file:// URL сохраняют кэш между сборками. Очищаем его перед
-  // загрузкой renderer, чтобы после обновления не выполнялся старый app.js.
-  mainWindow.webContents.session.clearCache()
-    .catch(() => {})
-    .finally(() => { mainWindow.loadFile("index.html"); });
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const protocol = new URL(url).protocol;
+      if (protocol === "https:" || protocol === "http:") shell.openExternal(url);
+    } catch {}
+    return { action: "deny" };
+  });
+  mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => logDiagnostic(`console[${level}] ${sourceId}:${line} ${message}`));
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => logDiagnostic(`load failed ${errorCode} ${errorDescription}: ${validatedURL}`));
+  mainWindow.webContents.on("did-finish-load", () => logDiagnostic(`loaded ${mainWindow.webContents.getURL()}`));
+  await mainWindow.webContents.session.clearCache().catch(() => {});
+  await mainWindow.loadURL(await startRendererServer());
 }
 
 if (require("electron-squirrel-startup")) {
@@ -312,27 +402,26 @@ if (require("electron-squirrel-startup")) {
 } else {
   app.whenReady().then(async () => {
     await loadData();
-
-    // Electron renders our UI from file://, so Chromium does not attach a
-    // Referer to iframe requests. YouTube rejects such embeds with Error 153.
-    session.defaultSession.webRequest.onBeforeSendHeaders(
-      { urls: ["https://*.youtube.com/*", "https://youtube.com/*", "https://*.youtube-nocookie.com/*"] },
-      (details, callback) => {
-        details.requestHeaders.Referer = "https://yt-lang-learning.local/";
-        callback({ requestHeaders: details.requestHeaders });
-      }
-    );
+    logDiagnostic(`start ${APP_VERSION}`);
 
     ipcMain.handle("app:get-info", () => ({ version: APP_VERSION, dataDirectory: dataDirectory() }));
     ipcMain.handle("youtube:get-metadata", async (_event, url) => {
       try {
-        const response = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        const response = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`, { signal: controller.signal });
+        clearTimeout(timeout);
         if (!response.ok) throw new Error(`YouTube ответил с кодом ${response.status}`);
         const metadata = await response.json();
         return { title: metadata.title || "Новый урок" };
       } catch (error) {
         return { title: "Новый урок", warning: error.message };
       }
+    });
+    ipcMain.handle("youtube:open-playlist", async (_event, url) => {
+      const playlistUrl = normalizeYoutubePlaylistUrl(url);
+      await shell.openExternal(playlistUrl);
+      return { url: playlistUrl };
     });
     ipcMain.handle("library:get", () => library);
     ipcMain.handle("library:save", async (_event, nextLibrary) => {
@@ -348,7 +437,10 @@ if (require("electron-squirrel-startup")) {
       studiedIds: Array.isArray(captions?.studiedIds) ? captions.studiedIds : [],
     }));
     ipcMain.handle("captions:download-english", (_event, payload) => oncePerCaptionJob(`youtube:${payload.videoId}`, () => downloadEnglishCaptions(payload)));
-    ipcMain.handle("captions:transcribe-english", (_event, payload) => oncePerCaptionJob(`whisper:${payload.videoId}`, () => transcribeEnglishCaptions(payload)));
+    ipcMain.handle("captions:transcribe-english", (event, payload) => oncePerCaptionJob(
+      `whisper:${payload.videoId}`,
+      () => transcribeEnglishCaptions(payload, progress => event.sender.send("captions:transcription-progress", progress))
+    ));
     ipcMain.handle("captions:translate", (event, videoId) => oncePerCaptionJob(`translate:${videoId}`, () => translateCaptions(videoId, progress => event.sender.send("captions:translation-progress", progress))));
     ipcMain.handle("settings:get", () => publicSettings());
     ipcMain.handle("settings:save", async (_event, payload) => {
@@ -363,9 +455,10 @@ if (require("electron-squirrel-startup")) {
       return result;
     });
 
-    createWindow();
+    await createWindow();
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   });
 
   app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+  app.on("will-quit", () => { rendererServer?.close(); });
 }

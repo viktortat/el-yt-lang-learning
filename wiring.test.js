@@ -13,6 +13,12 @@ test("every preload IPC call has exactly one main-process handler", () => {
   assert.equal(new Set(handled).size, handled.length);
 });
 
+test("external links are opened in the system browser instead of a child window", () => {
+  assert.match(mainSource, /setWindowOpenHandler/);
+  assert.match(mainSource, /shell\.openExternal\(url\)/);
+  assert.match(mainSource, /return \{ action: "deny" \}/);
+});
+
 test("every rendered button id has a renderer binding", () => {
   const ids = [...new Set([...appSource.matchAll(/<button[^>]*\sid="([^"]+)"/g)].map(match => match[1]))];
   const unbound = ids.filter(id => !appSource.includes(`querySelector("#${id}")`));
@@ -65,6 +71,18 @@ test("caption downloads are deduplicated and local transcription requires consen
 test("translation reports progress and is deduplicated per video", () => {
   assert.match(mainSource, /oncePerCaptionJob\(`translate:\$\{videoId\}`/);
   assert.match(mainSource, /captions:translation-progress/);
+  assert.match(mainSource, /response_format: \{ type: "json_schema"/);
   assert.match(preloadSource, /onTranslationProgress/);
   assert.match(appSource, /Переведено \$\{progress\.completed\} из \$\{progress\.total\}/);
+});
+
+test("local transcription reports progress to the active video", () => {
+  assert.match(mainSource, /captions:transcription-progress/);
+  assert.match(mainSource, /PYTHONUNBUFFERED: "1"/);
+  assert.match(mainSource, /parseDownloadProgress/);
+  assert.match(mainSource, /stage: "download"/);
+  assert.match(mainSource, /stage: "transcription"/);
+  assert.match(preloadSource, /onTranscriptionProgress/);
+  assert.match(appSource, /Загружено видео \$\{progress\.percent\}%/);
+  assert.match(appSource, /Распознано \$\{progress\.percent\}%/);
 });

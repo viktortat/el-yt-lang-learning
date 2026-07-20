@@ -5,7 +5,7 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.PlayerControls = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, captionSync => {
-  const SUPPORTED_COMMANDS = Object.freeze(["play", "back", "forward", "repeat", "rate", "seek"]);
+  const SUPPORTED_COMMANDS = Object.freeze(["play", "back", "previous", "forward", "repeat", "rate", "seek"]);
 
   function execute({ player, command, value, captions = [] }) {
     if (!player) return { ok: false, message: "Плеер YouTube ещё загружается" };
@@ -50,6 +50,19 @@
         player.seekTo(Number(caption.start), true);
         player.playVideo();
         return { ok: true, caption };
+      }
+
+      if (command === "previous") {
+        const current = captionSync.findCurrentCaption(captions, currentTime);
+        const currentIndex = captions.findIndex(caption => caption.id === current?.id);
+        const previous = currentIndex > 0
+          ? captions[currentIndex - 1]
+          : [...captions].reverse().find(caption => Number(caption.start) < currentTime);
+        if (!previous) return { ok: false, message: "Предыдущая реплика не найдена" };
+        if (typeof player.playVideo !== "function") throw new Error("Плеер ещё не готов");
+        player.seekTo(Number(previous.start), true);
+        player.playVideo();
+        return { ok: true, caption: previous };
       }
 
       return { ok: false, message: `Неизвестная команда плеера: ${command}` };

@@ -15,6 +15,166 @@
           "studied": 0,
           "position": 0
         }
+      },
+      {
+        "id": "folder-mrsxsopq-h9dzp",
+        "type": "folder",
+        "name": "Сериалы",
+        "children": [
+          {
+            "id": "folder-mrsyex7b-jsec4",
+            "type": "folder",
+            "name": "Extra English",
+            "children": [
+              {
+                "id": "video-mrsxeonb-4pevn",
+                "type": "video",
+                "name": "Extra English Episode 1",
+                "url": "https://www.youtube.com/watch?v=DjufuMDV9D8",
+                "createdAt": "2026-07-20T07:51:38.567Z",
+                "progress": {
+                  "studied": 0,
+                  "position": 0
+                }
+              },
+              {
+                "id": "video-mrsyrdui-asm5b",
+                "type": "video",
+                "name": "Extr@ English Episode 2 Hector Goes Shopping",
+                "url": "https://www.youtube.com/watch?v=WnLSdMemZrk",
+                "createdAt": "2026-07-20T08:29:30.714Z",
+                "progress": {
+                  "studied": 0,
+                  "position": 0
+                }
+              },
+              {
+                "id": "video-mrt0090x-8dola",
+                "type": "video",
+                "name": "Extra English episode 3",
+                "url": "https://www.youtube.com/watch?v=p3-eYfT8-Ok",
+                "createdAt": "2026-07-20T09:04:23.985Z",
+                "progress": {
+                  "studied": 0,
+                  "position": 0
+                }
+              },
+              {
+                "id": "video-mrt0wpwx-hwwsp",
+                "type": "video",
+                "name": "Extra English Episode 5  A Star Is Born",
+                "url": "https://www.youtube.com/watch?v=T-nOhblp-xI",
+                "createdAt": "2026-07-20T09:29:38.865Z",
+                "progress": {
+                  "studied": 0,
+                  "position": 0
+                }
+              }
+            ],
+            "playlistUrl": "https://www.youtube.com/playlist?list=PLJZxh1ZCIq9KUlr96AUBa4xKgT9MJ-O1_"
+          },
+          {
+            "id": "folder-mrsz33wr-xvutz",
+            "type": "folder",
+            "name": "Pre-Intermediate level",
+            "children": [
+              {
+                "id": "video-mrsz2m0y-j33uz",
+                "type": "video",
+                "name": "Pre-Intermediate level - Learn English through Oxford English video",
+                "url": "https://www.youtube.com/watch?v=mzpCCqKBgWw",
+                "createdAt": "2026-07-20T08:38:14.530Z",
+                "progress": {
+                  "studied": 0,
+                  "position": 0
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "video-mrsywysm-1diij",
+        "type": "video",
+        "name": "Are you following your dreams? ⏲️ 6 Minute English",
+        "url": "https://www.youtube.com/watch?v=26PrgjTboVQ",
+        "createdAt": "2026-07-20T08:33:51.142Z",
+        "progress": {
+          "studied": 0,
+          "position": 0
+        }
+      },
+      {
+        "id": "folder-mrszmwoq-me8y3",
+        "type": "folder",
+        "name": "TED",
+        "children": [
+          {
+            "id": "video-mrszml53-oammv",
+            "type": "video",
+            "name": "The Case for Making Art in a Crisis | Yiyun Kang | TED",
+            "url": "https://www.youtube.com/watch?v=WY-jr1m3xq8",
+            "createdAt": "2026-07-20T08:53:46.503Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mrszocmf-6btu8",
+            "type": "video",
+            "name": "Welcome to My AI Surrealist World | David Szauder | TED",
+            "url": "https://www.youtube.com/watch?v=GTCZz_QWBKs",
+            "createdAt": "2026-07-20T08:55:08.775Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "folder-mrt0jlol-5ufvy",
+        "type": "folder",
+        "name": "News",
+        "children": [
+          {
+            "id": "folder-mrt0jddh-085wr",
+            "type": "folder",
+            "name": "CNN",
+            "children": [
+              {
+                "id": "video-mrt0iy5n-z4sfz",
+                "type": "video",
+                "name": "Newly declassified docs don't support Trump's election claims",
+                "url": "https://www.youtube.com/watch?v=o7wiKHdef1g",
+                "createdAt": "2026-07-20T09:18:56.363Z",
+                "progress": {
+                  "studied": 0,
+                  "position": 0
+                }
+              }
+            ]
+          },
+          {
+            "id": "folder-mrt03sv0-4n1ay",
+            "type": "folder",
+            "name": "BBC News",
+            "children": [
+              {
+                "id": "video-mrt01dmw-bh527",
+                "type": "video",
+                "name": "Ukraine strike Russian online retail warehouses | BBC News",
+                "url": "https://www.youtube.com/watch?v=kjyOmZQQr6A",
+                "createdAt": "2026-07-20T09:05:16.616Z",
+                "progress": {
+                  "studied": 0,
+                  "position": 0
+                }
+              }
+            ]
+          }
+        ]
       }
     ]
   }

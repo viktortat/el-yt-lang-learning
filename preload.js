@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("appAPI", {
   getYoutubeMetadata: url => ipcRenderer.invoke("youtube:get-metadata", url),
   getLibrary: () => ipcRenderer.invoke("library:get"),
   saveLibrary: library => ipcRenderer.invoke("library:save", library),
+  openPlaylist: url => ipcRenderer.invoke("youtube:open-playlist", url),
   getCaptions: videoId => ipcRenderer.invoke("captions:get", videoId),
   saveCaptions: (videoId, captions) => ipcRenderer.invoke("captions:save", videoId, captions),
   downloadEnglishCaptions: payload => ipcRenderer.invoke("captions:download-english", payload),
@@ -14,6 +15,11 @@ contextBridge.exposeInMainWorld("appAPI", {
     const listener = (_event, progress) => callback(progress);
     ipcRenderer.on("captions:translation-progress", listener);
     return () => ipcRenderer.removeListener("captions:translation-progress", listener);
+  },
+  onTranscriptionProgress: callback => {
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on("captions:transcription-progress", listener);
+    return () => ipcRenderer.removeListener("captions:transcription-progress", listener);
   },
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: payload => ipcRenderer.invoke("settings:save", payload),

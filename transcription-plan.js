@@ -6,6 +6,7 @@
   function downloadVideoArgs(outputTemplate, url) {
     return [
       "--no-playlist",
+      "--newline",
       "-f", "worst[ext=mp4]/worst",
       "--merge-output-format", "mp4",
       "-o", outputTemplate,
@@ -44,5 +45,26 @@
       || files.find(file => file.endsWith(".vtt"));
   }
 
-  return { downloadVideoArgs, transcriberArgs, captionsFromTranscript, hasVtt, chooseEnglishVtt };
+  function createProgressParser(kind) {
+    const pattern = kind === "download"
+      ? /\[download\]\s+([\d.]+)%/g
+      // Процент остаётся ASCII даже при несовпадении кодировок Python и Node.js.
+      : /([\d.]+)%/g;
+    let buffer = "";
+    let lastPercent = -1;
+    return output => {
+      buffer = `${buffer}${output}`;
+      const percentages = [];
+      for (const match of buffer.matchAll(pattern)) {
+        const percent = Math.min(100, Math.round(Number(match[1])));
+        if (Number.isFinite(percent) && percent !== lastPercent) percentages.push(percent);
+        lastPercent = percent;
+      }
+      // Сохраняем хвост на случай, если метка и число разделены между chunks stdout.
+      buffer = buffer.slice(-64);
+      return percentages;
+    };
+  }
+
+  return { downloadVideoArgs, transcriberArgs, captionsFromTranscript, hasVtt, chooseEnglishVtt, createProgressParser };
 });
