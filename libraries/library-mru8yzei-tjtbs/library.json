@@ -2,13 +2,231 @@
   "version": 2,
   "preferences": {
     "studyLanguage": "pl",
-    "translationLanguage": "ru",
+    "translationLanguage": "uk",
     "translationInstruction": ""
   },
   "root": {
     "id": "root",
     "type": "folder",
     "name": "Польский",
-    "children": []
+    "children": [
+      {
+        "id": "video-mruf75x7-6kdrm",
+        "type": "video",
+        "name": "MÓWIĘ PO POLSKU! || ВИДЕО НА ПОЛЬСКОМ ЯЗЫКЕ",
+        "url": "https://www.youtube.com/watch?v=gWeOesgsr8Q",
+        "createdAt": "2026-07-21T08:57:26.971Z",
+        "progress": {
+          "studied": 0,
+          "position": 0
+        }
+      },
+      {
+        "id": "video-mrufokn5-rk4tu",
+        "type": "video",
+        "name": "NIEŚĆ with Prefixes in Polish 🇵🇱 - Everything You Need to Know",
+        "url": "https://www.youtube.com/watch?v=S1vaMADC2AU",
+        "createdAt": "2026-07-21T09:10:59.201Z",
+        "progress": {
+          "studied": 0,
+          "position": 0
+        }
+      },
+      {
+        "id": "folder-mrufpk7n-swhk1",
+        "type": "folder",
+        "name": "Polish Grammar is easy",
+        "children": [
+          {
+            "id": "video-mruftvkr-iy5f0",
+            "type": "video",
+            "name": "Learn Polish Conditional in 5 min: If I were rich... (Conditional sentences)",
+            "url": "https://www.youtube.com/watch?v=AXWM1lEzRc4",
+            "createdAt": "2026-07-21T09:15:06.651Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mruftvkr-fb6of",
+            "type": "video",
+            "name": "STOP ❌ Making The Most Common Mistake in Polish! 🇵🇱🤯",
+            "url": "https://www.youtube.com/watch?v=QHaPYcJ-qK8",
+            "createdAt": "2026-07-21T09:15:06.651Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mruftvkr-duit7",
+            "type": "video",
+            "name": "Perfective & Imperfective Verbs in Polish: All You Need to Know!",
+            "url": "https://www.youtube.com/watch?v=kyX2qMi5KeE",
+            "createdAt": "2026-07-21T09:15:06.651Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mruftvkr-hjxql",
+            "type": "video",
+            "name": "STOP ❌ Making This Mistake in Polish Cases 🇵🇱 | Learn Easy Polish Grammar",
+            "url": "https://www.youtube.com/watch?v=fUnukm1okbA",
+            "createdAt": "2026-07-21T09:15:06.651Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mruftvkr-luxc6",
+            "type": "video",
+            "name": "VOCATIVE CASE (Wołacz): Learn Polish Grammar (Polish cases)",
+            "url": "https://www.youtube.com/watch?v=A4fe6SjCOWs",
+            "createdAt": "2026-07-21T09:15:06.651Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mruftvkr-za486",
+            "type": "video",
+            "name": "IMPERSONAL VERBS in Polish: Learn Polish Grammar!",
+            "url": "https://www.youtube.com/watch?v=oDnnIqQqnxY",
+            "createdAt": "2026-07-21T09:15:06.651Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mruftvkr-cl8lk",
+            "type": "video",
+            "name": "You NEED to know this about INSTRUMENTAL CASE (narzędnik) in POLISH",
+            "url": "https://www.youtube.com/watch?v=CTqsjjbmEbg",
+            "createdAt": "2026-07-21T09:15:06.651Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mruftvkr-4x639",
+            "type": "video",
+            "name": "Learn the LOCATIVE CASE (MIEJSCOWNIK) in context",
+            "url": "https://www.youtube.com/watch?v=mSwR4BN18PA",
+            "createdAt": "2026-07-21T09:15:06.651Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mruftvkr-gpfk5",
+            "type": "video",
+            "name": "What did you do this summer? | Learn the POLISH PAST TENSE in context",
+            "url": "https://www.youtube.com/watch?v=nl2D0I-Omss",
+            "createdAt": "2026-07-21T09:15:06.651Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mruftvkr-zymrx",
+            "type": "video",
+            "name": "What are Poles like? | Learn DATIVE CASE in context",
+            "url": "https://www.youtube.com/watch?v=JRWtGxnLiQs",
+            "createdAt": "2026-07-21T09:15:06.651Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mruftvkr-lp55m",
+            "type": "video",
+            "name": "Polish DECLENSION: Genitive Case explained in 5 minutes",
+            "url": "https://www.youtube.com/watch?v=KgFD-CkRkWI",
+            "createdAt": "2026-07-21T09:15:06.651Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mruftvkr-mf9ie",
+            "type": "video",
+            "name": "POLISH QUIZ | Verbs",
+            "url": "https://www.youtube.com/watch?v=0iPD6Jjzq_g",
+            "createdAt": "2026-07-21T09:15:06.651Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mruftvkr-3495i",
+            "type": "video",
+            "name": "STOP making this common mistake in Polish",
+            "url": "https://www.youtube.com/watch?v=VjjnuF8xAzI",
+            "createdAt": "2026-07-21T09:15:06.651Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mruftvkr-kbdbh",
+            "type": "video",
+            "name": "Polish Negation | Grammar",
+            "url": "https://www.youtube.com/watch?v=94yYput89gE",
+            "createdAt": "2026-07-21T09:15:06.651Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mruftvkr-8aw2n",
+            "type": "video",
+            "name": "Learn Instrumental case (narzędnik) | Polish grammar",
+            "url": "https://www.youtube.com/watch?v=uCgL3E-Ue1w",
+            "createdAt": "2026-07-21T09:15:06.651Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mruftvkr-st17c",
+            "type": "video",
+            "name": "How to talk about the future in Polish? 3 rules you need to remember (en sub)",
+            "url": "https://www.youtube.com/watch?v=uzGCnWvWOiQ",
+            "createdAt": "2026-07-21T09:15:06.651Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mruftvkr-pkbnw",
+            "type": "video",
+            "name": "POLISH GRAMMAR IS COOL: Biernik (Accusative Case)",
+            "url": "https://www.youtube.com/watch?v=tTFQ9Ehl67w",
+            "createdAt": "2026-07-21T09:15:06.651Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          }
+        ],
+        "playlistUrl": "https://www.youtube.com/playlist?list=PLOaRg_PNiqWXEdoTPFapF-cpoRmqK63oD"
+      }
+    ]
   }
 }

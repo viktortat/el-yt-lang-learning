@@ -38,10 +38,11 @@
   }
 
   function normalizeLibraryPreferences(value = {}, defaults = normalizeLanguageSettings()) {
+    const preferences = value && typeof value === "object" ? value : {};
     return {
-      studyLanguage: normalizeLanguage(value.studyLanguage, defaults.studyLanguage),
-      translationLanguage: normalizeLanguage(value.translationLanguage, defaults.translationLanguage),
-      translationInstruction: String(value.translationInstruction || "").trim()
+      studyLanguage: normalizeLanguage(preferences.studyLanguage, defaults.studyLanguage),
+      translationLanguage: normalizeLanguage(preferences.translationLanguage, defaults.translationLanguage),
+      translationInstruction: String(preferences.translationInstruction || "").trim()
     };
   }
 

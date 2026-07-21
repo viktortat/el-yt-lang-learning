@@ -93,6 +93,7 @@ function defaultSettings() {
     translation: {
       provider: "openrouter",
       model: "google/gemini-2.5-flash-lite",
+      instruction: "",
       encryptedApiKey: ""
     },
     transcription: {
@@ -140,7 +141,7 @@ function normalizeSettings(value) {
     ...value,
     version: 2,
     languages: normalizeLanguageSettings(value?.languages),
-    translation: { ...defaults.translation, ...(value && value.translation) },
+    translation: { ...defaults.translation, ...(value && value.translation), instruction: String(value?.translation?.instruction || "").trim() },
     transcription: { ...defaults.transcription, ...(value && value.transcription) },
     onboarding: {
       ...defaults.onboarding,
@@ -575,7 +576,7 @@ async function translateCaptionTrack({ videoId, sourceLanguage, targetLanguage, 
   const target = normalizeLanguage(targetLanguage, captions.active.translationLanguage);
   if (!sourceTrack?.segments.length) throw new Error("Сначала получите исходную дорожку.");
   const translatedSegments = [];
-  const instruction = libraryPreferences(libraryId).translationInstruction;
+  const instruction = settings.translation.instruction;
   for (let offset = 0; offset < sourceTrack.segments.length; offset += 25) {
     const batch = sourceTrack.segments.slice(offset, offset + 25);
     const translatedById = new Map();
@@ -756,6 +757,10 @@ if (require("electron-squirrel-startup")) {
     });
     ipcMain.handle("library:get", () => library);
     ipcMain.handle("libraries:get", () => libraries);
+    ipcMain.handle("libraries:preferences", async () => Object.fromEntries(await Promise.all(libraries.libraries.map(async item => {
+      const itemLibrary = item.id === libraries.activeId ? library : normalizeLibrary(await readJson(libraryPath(item.id), defaultLibrary));
+      return [item.id, itemLibrary.preferences];
+    }))));
     ipcMain.handle("libraries:select", async (_event, libraryId) => {
       if (!libraries.libraries.some(item => item.id === libraryId)) throw new Error("Библиотека не найдена");
       libraries.activeId = libraryId;
@@ -763,14 +768,17 @@ if (require("electron-squirrel-startup")) {
       library = normalizeLibrary(await readJson(libraryPath(libraryId), defaultLibrary));
       return { libraries, library };
     });
-    ipcMain.handle("libraries:create", async (_event, name) => {
+    ipcMain.handle("libraries:create", async (_event, name, requestedPreferences) => {
       const trimmed = String(name || "").trim();
       if (!trimmed) throw new Error("Укажите название библиотеки");
+      const preferences = normalizeLibraryPreferences(requestedPreferences, settings.languages);
+      if (sameLanguage(preferences.studyLanguage, preferences.translationLanguage)) throw new Error("Выберите разные языки для изучения и перевода");
       const item = { id: newId("library"), name: trimmed, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       libraries.libraries.push(item);
       libraries.activeId = item.id;
       library = defaultLibrary();
       library.root.name = trimmed;
+      library.preferences = preferences;
       await writeJson(libraryPath(item.id), library);
       await writeJson(librariesPath(), libraries);
       return { libraries, library };
@@ -784,6 +792,23 @@ if (require("electron-squirrel-startup")) {
       if (libraryId === libraries.activeId) { library.root.name = trimmed; await writeJson(libraryPath(), library); }
       await writeJson(librariesPath(), libraries);
       return libraries;
+    });
+    ipcMain.handle("libraries:save-preferences", async (_event, libraryId, requestedPreferences) => {
+      if (!libraries.libraries.some(item => item.id === libraryId)) throw new Error("Библиотека не найдена");
+      const preferences = normalizeLibraryPreferences(requestedPreferences, settings.languages);
+      if (sameLanguage(preferences.studyLanguage, preferences.translationLanguage)) throw new Error("Выберите разные языки для изучения и перевода");
+      if (libraryId === libraries.activeId) {
+        library.preferences = preferences;
+        await writeJson(libraryPath(), library);
+      } else {
+        const itemLibrary = normalizeLibrary(await readJson(libraryPath(libraryId), defaultLibrary));
+        itemLibrary.preferences = preferences;
+        await writeJson(libraryPath(libraryId), itemLibrary);
+      }
+      const item = libraries.libraries.find(entry => entry.id === libraryId);
+      item.updatedAt = new Date().toISOString();
+      await writeJson(librariesPath(), libraries);
+      return preferences;
     });
     ipcMain.handle("libraries:delete", async (_event, libraryId) => {
       if (libraries.libraries.length < 2) throw new Error("Нельзя удалить последнюю библиотеку");

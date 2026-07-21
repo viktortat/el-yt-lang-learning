@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "preferences": {
+    "studyLanguage": "de",
+    "translationLanguage": "uk",
+    "translationInstruction": ""
+  },
+  "root": {
+    "id": "root",
+    "type": "folder",
+    "name": "Немецкий",
+    "children": []
+  }
+}

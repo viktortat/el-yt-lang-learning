@@ -1,7 +1,7 @@
 (() => {
   const app = document.querySelector("#app");
   const toast = document.querySelector("#toast");
-  const state = { library: null, libraries: null, settings: null, activeTab: "library", settingsSection: "appearance", selectedId: "root", playerVideoId: null, playerUrl: "", previewTitle: "", captions: window.LanguageModel.emptyCaptionDocument(), player: null, youTubeReady: false, expanded: new Set(["root"]), layout: JSON.parse(localStorage.getItem("ytll-layout") || '{"mode":"columns","english":true,"russian":true}') };
+  const state = { library: null, libraries: null, libraryPreferencesById: {}, expandedLibraryId: "", settings: null, activeTab: "library", settingsSection: "appearance", selectedId: "root", playerVideoId: null, playerUrl: "", previewTitle: "", captions: window.LanguageModel.emptyCaptionDocument(), player: null, youTubeReady: false, expanded: new Set(["root"]), layout: JSON.parse(localStorage.getItem("ytll-layout") || '{"mode":"columns","english":true,"russian":true}') };
   state.layout.leftWidth = Number(state.layout.leftWidth) || 320;
   state.layout.rightWidth = Number(state.layout.rightWidth) || 320;
   if (state.layout.mode === "columns" && !state.layout.english && !state.layout.russian) {
@@ -62,12 +62,12 @@
   function languageOptions(selected) {
     return `${selectableLanguages().map(language => `<option value="${escapeHtml(language)}" ${language === selected ? "selected" : ""}>${escapeHtml(languageName(language))}</option>`).join("")}<option value="__other__">Другой язык…</option>`;
   }
-  function showLanguagePicker() {
+  function showLanguagePicker({ allowRemember = true } = {}) {
     return new Promise(resolve => {
       const backdrop = document.createElement("div");
       backdrop.className = "dialog-backdrop";
       const options = sortLanguages(window.LanguageModel.SUPPORTED_LANGUAGES).map(language => `<option value="${language}">${escapeHtml(languageName(language))}</option>`).join("");
-      backdrop.innerHTML = `<form class="dialog-card language-picker"><h2>Выберите язык</h2><input name="search" placeholder="Поиск языка…" autocomplete="off" /><select name="language" size="10">${options}</select><label class="language-picker-check"><input type="checkbox" name="remember" checked /> Добавить в «Мои языки»</label><div class="form-actions"><button type="button" class="subtle-button" data-cancel>Отмена</button><button class="primary" type="submit">Выбрать</button></div></form>`;
+      backdrop.innerHTML = `<form class="dialog-card language-picker"><h2>Выберите язык</h2><input name="search" placeholder="Поиск языка…" autocomplete="off" /><select name="language" size="10">${options}</select>${allowRemember ? '<label class="language-picker-check"><input type="checkbox" name="remember" checked /> Добавить в «Мои языки»</label>' : ""}<div class="form-actions"><button type="button" class="subtle-button" data-cancel>Отмена</button><button class="primary" type="submit">Выбрать</button></div></form>`;
       const form = backdrop.querySelector("form");
       const select = form.elements.language;
       const finish = value => { backdrop.remove(); resolve(value); };
@@ -81,7 +81,7 @@
         event.preventDefault();
         const language = select.value;
         if (!language) return;
-        if (form.elements.remember.checked && !state.settings.languages.enabled.includes(language)) {
+        if (allowRemember && form.elements.remember.checked && !state.settings.languages.enabled.includes(language)) {
           const next = clone(state.settings);
           next.languages.enabled.push(language);
           state.settings = await window.appAPI.saveSettings({ settings: next });
@@ -225,8 +225,15 @@
 
   function renderFolderInspector(folder) {
     if (folder.id === "root") {
-      const items = state.libraries.libraries.map(item => `<button class="library-overview-row ${item.id === activeLibraryId() ? "active" : ""}" data-library-select="${item.id}"><span class="node-icon">${icon("library", "tree-node-icon")}</span><span><strong>${escapeHtml(item.name)}</strong><small>${item.id === activeLibraryId() ? "Текущая библиотека" : "Переключиться"}</small></span>${item.id === activeLibraryId() ? '<span class="node-chip">Текущая</span>' : ""}</button>`).join("");
-      return `<section class="library-overview"><header class="inspector-header"><div><p class="eyebrow">Библиотеки</p><h1 class="view-title">Управление библиотеками</h1><p class="hint">Каждая библиотека хранит отдельные ролики, прогресс и субтитры.</p></div></header><div class="language-summary"><strong>${escapeHtml(languageName(state.library.preferences.studyLanguage))} → ${escapeHtml(languageName(state.library.preferences.translationLanguage))}</strong><span>Языковая пара этой библиотеки</span></div><div class="library-overview-list">${items}</div><div class="form-actions"><button class="primary" id="createLibraryMain">Новая библиотека</button><button class="subtle-button" id="libraryLanguages">Языки библиотеки</button><button class="subtle-button" id="importLibraryMain">Импортировать</button><button class="subtle-button" id="manageLibrariesMain">Настроить библиотеки</button><button class="subtle-button" id="showBackupsMain">Резервные копии</button></div></section>`;
+      const items = state.libraries.libraries.map(item => {
+        const expanded = item.id === state.expandedLibraryId;
+        const preferences = state.libraryPreferencesById[item.id] || (item.id === activeLibraryId() ? state.library.preferences : null);
+        const languagePair = preferences ? `${languageName(preferences.studyLanguage)} → ${languageName(preferences.translationLanguage)}` : "Языки не загружены";
+        const languageOptions = selected => sortLanguages(state.settings.languages.enabled).map(language => `<option value="${escapeHtml(language)}" ${language === selected ? "selected" : ""}>${escapeHtml(languageName(language))}</option>`).join("");
+        const languageSettings = preferences ? `<div class="library-language-settings"><label>Изучаемый язык<select data-library-study-language="${item.id}">${languageOptions(preferences.studyLanguage)}</select></label><label>Язык перевода<select data-library-translation-language="${item.id}">${languageOptions(preferences.translationLanguage)}</select></label></div>` : "";
+        return `<article class="library-overview-item ${item.id === activeLibraryId() ? "active" : ""} ${expanded ? "expanded" : ""}"><button class="library-overview-summary" data-library-toggle="${item.id}" aria-expanded="${expanded}" aria-controls="library-actions-${item.id}"><span class="node-icon">${icon("library", "tree-node-icon")}</span><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(languagePair)}</small></span>${item.id === activeLibraryId() ? '<span class="node-chip">Текущая</span>' : ""}<span class="library-overview-chevron">${icon(expanded ? "chevronDown" : "chevronRight")}</span></button><div class="library-overview-details" id="library-actions-${item.id}" ${expanded ? "" : "hidden"}>${languageSettings}<div class="library-overview-actions"><button class="subtle-button library-overview-action" data-library-open="${item.id}" title="Перейти в библиотеку" aria-label="Перейти в библиотеку">${icon("externalLink")}</button><button class="subtle-button library-overview-action" data-library-export="${item.id}" title="Экспортировать библиотеку" aria-label="Экспортировать библиотеку">${icon("export")}</button><button class="subtle-button library-overview-action" data-library-rename="${item.id}" title="Переименовать библиотеку" aria-label="Переименовать библиотеку">${icon("edit")}</button><button class="subtle-button danger library-overview-action" data-library-delete="${item.id}" title="Удалить библиотеку" aria-label="Удалить библиотеку" ${state.libraries.libraries.length === 1 ? "disabled" : ""}>${icon("trash")}</button></div></div></article>`;
+      }).join("");
+      return `<section class="library-overview"><header class="inspector-header"><div><p class="eyebrow">Библиотеки</p><h1 class="view-title">Управление библиотеками</h1><p class="hint">Каждая библиотека хранит отдельные ролики, прогресс и субтитры.</p></div></header><div class="library-overview-list">${items}</div><div class="library-overview-global-actions"><button class="primary library-overview-action" id="createLibraryMain" title="Новая библиотека" aria-label="Новая библиотека">${icon("libraryPlus")}</button><button class="subtle-button library-overview-action" id="importLibraryMain" title="Импортировать библиотеку" aria-label="Импортировать библиотеку">${icon("import")}</button><button class="subtle-button library-overview-action" id="showBackupsMain" title="Резервные копии" aria-label="Резервные копии">${icon("restore")}</button></div></section>`;
     }
     const videos = directChildren(folder).length;
     return `<header class="inspector-header"><div><p class="eyebrow">Папка</p><h1 class="view-title">${escapeHtml(folder.name)}</h1></div><span class="node-chip">${videos} роликов</span></header><form class="form folder-form" id="folderForm"><label class="field">YouTube-плейлист<div class="playlist-input"><input name="playlistUrl" value="${escapeHtml(folder.playlistUrl || "")}" placeholder="https://www.youtube.com/watch?v=…&list=…" autocomplete="off" /><button class="subtle-button folder-action" type="button" id="openPlaylist" title="Открыть плейлист в браузере" aria-label="Открыть плейлист в браузере">${icon("externalLink")}</button></div></label><p class="hint">Ссылка сохраняется только для этой папки.</p><label class="field">Добавить ролики из плейлиста<div class="playlist-input"><input name="importPlaylistUrl" placeholder="https://www.youtube.com/playlist?list=…" autocomplete="off" /><button class="primary playlist-import-button" type="button" id="importPlaylistVideos">Добавить</button></div></label><p class="hint">Поле используется только для загрузки списка роликов; ссылка не сохраняется.</p><div class="form-actions"><button class="primary folder-action" type="submit" title="Сохранить ссылку" aria-label="Сохранить ссылку">${icon("save")}</button><button class="subtle-button folder-action" type="button" data-action="rename" title="Переименовать" aria-label="Переименовать">${icon("edit")}</button><button class="subtle-button folder-action" type="button" data-action="add-video" title="Добавить ролик" aria-label="Добавить ролик">${icon("videoPlus")}</button><button class="subtle-button danger folder-action" type="button" data-action="delete" title="Удалить" aria-label="Удалить">${icon("trash")}</button></div></form>`;
@@ -542,7 +549,10 @@
       if (generation !== state.captionGeneration || context.youtubeId !== activeYoutubeId()) return;
       state.captions = captions;
       render();
-      if (automaticDownload && !studyTrack()) showToast(`Для ролика пока нет дорожки «${languageName(studyLanguage())}»`);
+      if (automaticDownload && !studyTrack()?.segments.length) {
+        showToast(`Ищу на YouTube дорожку «${languageName(studyLanguage())}»…`);
+        void downloadTrackForActive(studyLanguage(), false, generation);
+      }
     } catch (error) {
       if (generation === state.captionGeneration) showToast(error.message);
     }
@@ -852,6 +862,7 @@
       const result = await window.appAPI.selectLibrary(libraryId);
       state.libraries = result.libraries;
       state.library = result.library;
+      state.libraryPreferencesById[libraryId] = result.library.preferences;
       state.selectedId = "root";
       state.playerVideoId = null;
       state.playerUrl = "";
@@ -864,22 +875,46 @@
   function createLibrary() {
     closeLibraryDialog();
     if (document.querySelector("#createLibraryDialog")) return;
+    const preferences = state.settings?.languages || { studyLanguage: "en", translationLanguage: "ru" };
     const dialog = document.createElement("div");
     dialog.className = "dialog-backdrop";
     dialog.id = "createLibraryDialog";
-    dialog.innerHTML = `<form class="dialog-card" aria-labelledby="createLibraryDialogTitle"><h2 id="createLibraryDialogTitle">Новая библиотека</h2><label class="field">Название библиотеки<input name="name" value="Новая библиотека" autocomplete="off" required /></label><p class="hint">Будет создана пустая библиотека и выбрана сразу после создания.</p><div class="form-actions"><button class="subtle-button" type="button" data-dialog-cancel>Отмена</button><button class="primary" type="submit">Создать</button></div></form>`;
+    dialog.innerHTML = `<form class="dialog-card" aria-labelledby="createLibraryDialogTitle"><h2 id="createLibraryDialogTitle">Новая библиотека</h2><label class="field">Название библиотеки<input name="name" value="Новая библиотека" autocomplete="off" required /></label><label class="field">Изучаемый язык<select name="studyLanguage">${languageOptions(preferences.studyLanguage)}</select></label><label class="field">Язык перевода<select name="translationLanguage">${languageOptions(preferences.translationLanguage)}</select></label><p class="hint">Языки берутся из общих настроек, но действуют только для этой библиотеки.</p><div class="form-actions"><button class="subtle-button" type="button" data-dialog-cancel>Отмена</button><button class="primary" type="submit">Создать</button></div></form>`;
     const form = dialog.querySelector("form");
     const input = form.elements.name;
+    const setLanguage = (select, language) => {
+      if (![...select.options].some(option => option.value === language)) select.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(language)}">${escapeHtml(languageName(language))}</option>`);
+      select.value = language;
+    };
+    const bindLanguagePicker = select => {
+      let previous = select.value;
+      select.addEventListener("change", async () => {
+        if (select.value !== "__other__") { previous = select.value; return; }
+        const language = await showLanguagePicker({ allowRemember: false });
+        if (!language) { select.value = previous; return; }
+        setLanguage(select, language);
+        previous = language;
+      });
+    };
+    bindLanguagePicker(form.elements.studyLanguage);
+    bindLanguagePicker(form.elements.translationLanguage);
+    input.readOnly = false;
+    input.disabled = false;
+    dialog.addEventListener("keydown", event => event.stopPropagation());
     dialog.addEventListener("click", event => { if (event.target === dialog) closeCreateLibraryDialog(); });
     dialog.querySelector("[data-dialog-cancel]").addEventListener("click", closeCreateLibraryDialog);
     form.addEventListener("submit", async event => {
       event.preventDefault();
       const name = input.value.trim();
       if (!name) return input.focus();
+      const requestedPreferences = { studyLanguage: form.elements.studyLanguage.value, translationLanguage: form.elements.translationLanguage.value };
+      if (window.LanguageModel.sameLanguage(requestedPreferences.studyLanguage, requestedPreferences.translationLanguage)) return showToast("Языки совпадают. Выберите разные языки для двух полей.");
       try {
-        const result = await window.appAPI.createLibrary(name);
+        const result = await window.appAPI.createLibrary(name, requestedPreferences);
         state.libraries = result.libraries;
         state.library = result.library;
+        state.libraryPreferencesById[result.libraries.activeId] = result.library.preferences;
+        state.expandedLibraryId = result.libraries.activeId;
         state.selectedId = "root";
         state.playerVideoId = null;
         startCaptionSession();
@@ -903,6 +938,9 @@
     dialog.innerHTML = `<form class="dialog-card" aria-labelledby="renameLibraryDialogTitle"><h2 id="renameLibraryDialogTitle">Переименовать библиотеку</h2><label class="field">Название библиотеки<input name="name" value="${escapeHtml(item.name)}" autocomplete="off" required /></label><div class="form-actions"><button class="subtle-button" type="button" data-dialog-cancel>Отмена</button><button class="primary" type="submit">Сохранить</button></div></form>`;
     const form = dialog.querySelector("form");
     const input = form.elements.name;
+    input.readOnly = false;
+    input.disabled = false;
+    dialog.addEventListener("keydown", event => event.stopPropagation());
     dialog.addEventListener("click", event => { if (event.target === dialog) closeRenameLibraryDialog(); });
     dialog.querySelector("[data-dialog-cancel]").addEventListener("click", closeRenameLibraryDialog);
     form.addEventListener("submit", async event => {
@@ -928,6 +966,7 @@
       if (result.canceled) return;
       state.libraries = result.libraries;
       state.library = result.library;
+      state.libraryPreferencesById = await window.appAPI.getLibraryPreferences();
       state.selectedId = "root";
       state.playerVideoId = null;
       startCaptionSession();
@@ -936,6 +975,27 @@
     } catch (error) { showToast(`Не удалось импортировать библиотеку: ${error.message}`); }
   }
   function closeLibraryDialog() { document.querySelector("#libraryDialog")?.remove(); }
+  async function deleteLibrary(libraryId) {
+    const item = state.libraries.libraries.find(entry => entry.id === libraryId);
+    if (!item) return;
+    if (confirm(`Экспортировать библиотеку «${item.name}» перед удалением?`)) {
+      try { const exported = await window.appAPI.exportLibrary(item.id); if (exported.canceled) return; } catch (error) { return showToast(`Не удалось экспортировать библиотеку: ${error.message}`); }
+    }
+    if (!confirm(`Удалить библиотеку «${item.name}»? Перед удалением будет создана резервная копия, затем файлы будут перемещены в Корзину.`)) return;
+    try {
+      const result = await window.appAPI.deleteLibrary(item.id);
+      state.libraries = result.libraries;
+      state.library = result.library;
+      state.libraryPreferencesById = await window.appAPI.getLibraryPreferences();
+      state.expandedLibraryId = activeLibraryId();
+      state.selectedId = "root";
+      state.playerVideoId = null;
+      startCaptionSession();
+      closeLibraryDialog();
+      render();
+      showToast("Библиотека перемещена в Корзину");
+    } catch (error) { showToast(`Не удалось удалить библиотеку: ${error.message}`); }
+  }
   function manageLibraries() {
     closeLibraryDialog();
     const dialog = document.createElement("div");
@@ -950,25 +1010,7 @@
       try { const result = await window.appAPI.exportLibrary(button.dataset.libraryExport); if (!result.canceled) showToast("Библиотека экспортирована"); } catch (error) { showToast(error.message); }
     }));
     dialog.querySelectorAll("[data-library-rename]").forEach(button => button.addEventListener("click", () => renameLibrary(button.dataset.libraryRename)));
-    dialog.querySelectorAll("[data-library-delete]").forEach(button => button.addEventListener("click", async () => {
-      const item = state.libraries.libraries.find(entry => entry.id === button.dataset.libraryDelete);
-      if (!item) return;
-      if (confirm(`Экспортировать библиотеку «${item.name}» перед удалением?`)) {
-        try { const exported = await window.appAPI.exportLibrary(item.id); if (exported.canceled) return; } catch (error) { return showToast(`Не удалось экспортировать библиотеку: ${error.message}`); }
-      }
-      if (!confirm(`Удалить библиотеку «${item.name}»? Перед удалением будет создана резервная копия, затем файлы будут перемещены в Корзину.`)) return;
-      try {
-        const result = await window.appAPI.deleteLibrary(item.id);
-        state.libraries = result.libraries;
-        state.library = result.library;
-        state.selectedId = "root";
-        state.playerVideoId = null;
-        startCaptionSession();
-        closeLibraryDialog();
-        render();
-        showToast("Библиотека перемещена в Корзину");
-      } catch (error) { showToast(`Не удалось удалить библиотеку: ${error.message}`); }
-    }));
+    dialog.querySelectorAll("[data-library-delete]").forEach(button => button.addEventListener("click", () => deleteLibrary(button.dataset.libraryDelete)));
     document.body.append(dialog);
   }
   async function showBackups() {
@@ -1013,31 +1055,12 @@
     document.body.append(menu);
   }
   function closeContextMenu() { document.querySelector(".context-menu")?.remove(); }
-  function showLibraryLanguageDialog() {
-    const preferences = state.library.preferences;
-    const languages = sortLanguages(state.settings.languages.enabled);
-    const options = selected => languages.map(language => `<option value="${language}" ${language === selected ? "selected" : ""}>${escapeHtml(languageName(language))}</option>`).join("");
-    const backdrop = document.createElement("div");
-    backdrop.className = "dialog-backdrop";
-    backdrop.innerHTML = `<form class="dialog-card" id="libraryLanguageForm"><h2>Языки библиотеки</h2><label class="field">Изучаемый язык<select name="studyLanguage">${options(preferences.studyLanguage)}</select></label><label class="field">Язык перевода<select name="translationLanguage">${options(preferences.translationLanguage)}</select></label><label class="field">Инструкция для OpenRouter<textarea name="translationInstruction" rows="3" placeholder="Например: переводи максимально буквально">${escapeHtml(preferences.translationInstruction || "")}</textarea></label><div class="form-actions"><button type="button" class="subtle-button" data-dialog-close>Отмена</button><button class="primary" type="submit">Сохранить</button></div></form>`;
-    const close = () => backdrop.remove();
-    backdrop.addEventListener("click", event => { if (event.target === backdrop) close(); });
-    backdrop.querySelector("[data-dialog-close]").addEventListener("click", close);
-    backdrop.querySelector("form").addEventListener("submit", async event => {
-      event.preventDefault();
-      const form = new FormData(event.currentTarget);
-      state.library.preferences = { studyLanguage: form.get("studyLanguage"), translationLanguage: form.get("translationLanguage"), translationInstruction: form.get("translationInstruction").trim() };
-      await saveLibrary();
-      close(); render(); showToast("Языки библиотеки сохранены");
-    });
-    document.body.append(backdrop);
-  }
   function showContextMenu(event, nodeId) {
     event.preventDefault(); closeContextMenu(); state.selectedId = nodeId;
     const node = findNode(nodeId);
     const menu = document.createElement("div"); menu.className = "context-menu"; menu.style.left = `${Math.min(event.clientX, window.innerWidth - 190)}px`; menu.style.top = `${Math.min(event.clientY, window.innerHeight - 165)}px`;
-    menu.innerHTML = `<button data-menu="folder">Новая папка</button><button data-menu="video">Добавить ролик</button><button data-menu="rename">Переименовать</button>${node.id === "root" ? "" : '<button class="danger" data-menu="delete">Удалить</button>'}`;
-    menu.addEventListener("click", item => { const action = item.target.dataset.menu; closeContextMenu(); if (action === "folder") createFolder(); if (action === "video") createVideo(); if (action === "rename") renameSelected(); if (action === "delete") deleteSelected(); });
+    menu.innerHTML = `<button data-menu="folder">${icon("folderPlus")}<span>Новая папка</span></button><button data-menu="video">${icon("videoPlus")}<span>Добавить ролик</span></button><button data-menu="rename">${icon("edit")}<span>Переименовать</span></button>${node.id === "root" ? "" : `<button class="danger" data-menu="delete">${icon("trash")}<span>Удалить</span></button>`}`;
+    menu.addEventListener("click", event => { const action = event.target.closest("[data-menu]")?.dataset.menu; if (!action) return; closeContextMenu(); if (action === "folder") createFolder(); if (action === "video") createVideo(); if (action === "rename") renameSelected(); if (action === "delete") deleteSelected(); });
     document.body.append(menu);
   }
   function playerCommand(command, value) {
@@ -1051,10 +1074,24 @@
     document.querySelector("#newFolder")?.addEventListener("click", createFolder); document.querySelector("#newVideo")?.addEventListener("click", createVideo); document.querySelector("#newVideoEmpty")?.addEventListener("click", createVideo); document.querySelector("#addVideoTop")?.addEventListener("click", createVideo); document.querySelector("#librarySwitcher")?.addEventListener("click", event => { event.stopPropagation(); showLibraryMenu(); }); document.querySelector("#manageLibraries")?.addEventListener("click", manageLibraries);
     document.querySelector("#createLibraryMain")?.addEventListener("click", createLibrary);
     document.querySelector("#importLibraryMain")?.addEventListener("click", importLibrary);
-    document.querySelector("#manageLibrariesMain")?.addEventListener("click", manageLibraries);
     document.querySelector("#showBackupsMain")?.addEventListener("click", showBackups);
-    document.querySelector("#libraryLanguages")?.addEventListener("click", showLibraryLanguageDialog);
-    document.querySelectorAll(".library-overview-row[data-library-select]").forEach(button => button.addEventListener("click", () => switchLibrary(button.dataset.librarySelect)));
+    document.querySelectorAll("[data-library-toggle]").forEach(button => button.addEventListener("click", () => { state.expandedLibraryId = state.expandedLibraryId === button.dataset.libraryToggle ? "" : button.dataset.libraryToggle; render(); }));
+    document.querySelectorAll("[data-library-open]").forEach(button => button.addEventListener("click", () => switchLibrary(button.dataset.libraryOpen)));
+    document.querySelectorAll("[data-library-study-language], [data-library-translation-language]").forEach(select => select.addEventListener("change", async () => {
+      const libraryId = select.dataset.libraryStudyLanguage || select.dataset.libraryTranslationLanguage;
+      const preferences = state.libraryPreferencesById[libraryId];
+      const studyLanguage = document.querySelector(`[data-library-study-language="${libraryId}"]`).value;
+      const translationLanguage = document.querySelector(`[data-library-translation-language="${libraryId}"]`).value;
+      try {
+        state.libraryPreferencesById[libraryId] = await window.appAPI.saveLibraryPreferences(libraryId, { ...preferences, studyLanguage, translationLanguage });
+        if (libraryId === activeLibraryId()) state.library.preferences = state.libraryPreferencesById[libraryId];
+        render();
+        showToast("Языки библиотеки сохранены");
+      } catch (error) { render(); showToast(error.message); }
+    }));
+    document.querySelectorAll("[data-library-export]").forEach(button => button.addEventListener("click", async () => { try { const result = await window.appAPI.exportLibrary(button.dataset.libraryExport); if (!result.canceled) showToast("Библиотека экспортирована"); } catch (error) { showToast(`Не удалось экспортировать библиотеку: ${error.message}`); } }));
+    document.querySelectorAll("[data-library-rename]").forEach(button => button.addEventListener("click", () => renameLibrary(button.dataset.libraryRename)));
+    document.querySelectorAll("[data-library-delete]").forEach(button => button.addEventListener("click", () => deleteLibrary(button.dataset.libraryDelete)));
     document.querySelectorAll("[data-toggle]").forEach(button => button.addEventListener("click", event => { event.stopPropagation(); const id = button.dataset.toggle; if (state.expanded.has(id)) state.expanded.delete(id); else state.expanded.add(id); render(); }));
     document.querySelectorAll(".tree-row").forEach(row => {
       row.addEventListener("click", () => { state.selectedId = row.dataset.nodeId; render(); });
@@ -1097,7 +1134,7 @@
     document.querySelector("#addRootVideo")?.addEventListener("click", () => addUrlToRoot(new FormData(document.querySelector("#playerLinkForm")).get("url")));
     document.querySelector("#loadStudyTrack")?.addEventListener("click", () => downloadTrackForActive(studyLanguage()));
     document.querySelector("#createTranslationTrack")?.addEventListener("click", createTranslationForActive);
-    document.querySelector("#studyLanguage")?.addEventListener("change", async event => { const language = event.target.value === "__other__" ? await showLanguagePicker() : event.target.value; if (!language) return render(); state.captions.active.studyLanguage = language; await saveCaptionDocument(); render(); if (!studyTrack()) showToast("Для выбранного языка нужно создать дорожку"); });
+    document.querySelector("#studyLanguage")?.addEventListener("change", async event => { const language = event.target.value === "__other__" ? await showLanguagePicker() : event.target.value; if (!language) return render(); state.captions.active.studyLanguage = language; await saveCaptionDocument(); render(); if (!studyTrack()?.segments.length) { showToast(`Ищу на YouTube дорожку «${languageName(language)}»…`); void downloadTrackForActive(language, false); } });
     document.querySelector("#translationLanguage")?.addEventListener("change", async event => { const language = event.target.value === "__other__" ? await showLanguagePicker() : event.target.value; if (!language) return render(); state.captions.active.translationLanguage = language; await saveCaptionDocument(); render(); if (!translationTrack()) showToast("Для выбранного языка нужно создать перевод"); });
     document.querySelectorAll("[data-track-version]").forEach(select => select.addEventListener("change", async () => { window.LanguageModel.setPreferredTrack(state.captions, select.dataset.trackVersion, select.value); await saveCaptionDocument(); render(); }));
     document.querySelector("#swapLanguages")?.addEventListener("click", () => { saveCurrentPlayerPosition(); state.layout.swapped = !state.layout.swapped; persistLayout(); render(); });
@@ -1113,6 +1150,17 @@
       });
       document.querySelectorAll("[data-settings-panel]").forEach(panel => panel.classList.toggle("active", panel.dataset.settingsPanel === state.settingsSection));
     }));
+    const translationSettings = document.querySelector('[data-settings-panel="translation"]');
+    if (translationSettings && !translationSettings.querySelector('[name="translationInstruction"]')) {
+      const row = document.createElement("label");
+      row.className = "settings-row";
+      row.innerHTML = `<span><strong>Инструкция для OpenRouter</strong><small>Применяется ко всем переводам субтитров.</small></span><textarea name="translationInstruction" rows="4" placeholder="Например: переводи максимально буквально">${escapeHtml(state.settings.translation.instruction || "")}</textarea>`;
+      translationSettings.querySelector('[name="model"]')?.closest("label")?.after(row);
+    }
+    document.querySelector("#settingsForm")?.addEventListener("submit", () => {
+      const instruction = document.querySelector('#settingsForm [name="translationInstruction"]');
+      if (instruction) state.settings.translation.instruction = instruction.value.trim();
+    }, true);
     const enabledLanguagesSelect = document.querySelector('#settingsForm [name="enabledLanguages"]');
     if (enabledLanguagesSelect) {
       const refreshLanguagePreview = () => {
@@ -1179,5 +1227,5 @@
   window.addEventListener("beforeunload", saveCurrentPlayerPosition);
   document.addEventListener("click", event => { if (!event.target.closest(".context-menu")) closeContextMenu(); });
   document.addEventListener("keydown", event => { if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return; if (state.activeTab !== "player") return; if (event.code === "Space") { event.preventDefault(); playerCommand("play"); } if (event.key === "ArrowLeft") playerCommand("back"); if (event.key === "ArrowRight") playerCommand("forward"); if (event.key === "[") playerCommand("rate", .75); if (event.key === "]") playerCommand("rate", 1.25); if (event.key.toLowerCase() === "r") playerCommand("repeat"); });
-  Promise.all([window.appAPI.getInfo(), window.appAPI.getLibrary(), window.appAPI.getLibraries(), window.appAPI.getSettings()]).then(async ([info, library, libraries, settings]) => { state.info = info; state.library = library; state.libraries = libraries; state.settings = settings; await offerDefaultLibrary(); render(); }).catch(error => { app.textContent = `Не удалось загрузить приложение: ${error.message}`; });
+  Promise.all([window.appAPI.getInfo(), window.appAPI.getLibrary(), window.appAPI.getLibraries(), window.appAPI.getLibraryPreferences(), window.appAPI.getSettings()]).then(async ([info, library, libraries, libraryPreferencesById, settings]) => { state.info = info; state.library = library; state.libraries = libraries; state.libraryPreferencesById = libraryPreferencesById; state.expandedLibraryId = libraries.activeId; state.settings = settings; await offerDefaultLibrary(); render(); }).catch(error => { app.textContent = `Не удалось загрузить приложение: ${error.message}`; });
 })();

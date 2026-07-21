@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "activeId": "library-mru8yegi-ykoqn",
+  "activeId": "library-default",
   "libraries": [
     {
       "id": "library-default",
@@ -18,7 +18,13 @@
       "id": "library-mru8yzei-tjtbs",
       "name": "Польский",
       "createdAt": "2026-07-21T06:03:07.578Z",
-      "updatedAt": "2026-07-21T08:36:28.624Z"
+      "updatedAt": "2026-07-21T09:15:24.967Z"
+    },
+    {
+      "id": "library-mrug9t52-9uz2f",
+      "name": "Немецкий",
+      "createdAt": "2026-07-21T09:27:29.990Z",
+      "updatedAt": "2026-07-21T09:27:29.990Z"
     }
   ]
 }
