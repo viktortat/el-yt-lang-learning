@@ -21,7 +21,8 @@ module.exports = {
       config: {
         name: "yt_lang_learning",
         setupExe: "yt-lang-learning-setup.exe",
-        setupIcon: "./assets/yt-lang-learning.ico"
+        setupIcon: "./assets/yt-lang-learning.ico",
+        loadingGif: "./assets/installer/installer-loading.gif"
       }
     },
     { name: "@electron-forge/maker-zip", platforms: ["win32", "darwin"] }

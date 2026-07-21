@@ -701,6 +701,30 @@ async function checkForUpdates() {
   } catch (error) { logDiagnostic(`update check error: ${error.message}`); return null; }
 }
 
+function launchInstallerAfterExit(installerPath) {
+  const powershellPath = path.join(
+    process.env.SystemRoot || "C:\\Windows",
+    "System32", "WindowsPowerShell", "v1.0", "powershell.exe"
+  );
+  if (!existsSync(powershellPath)) throw new Error("Windows PowerShell не найден");
+
+  const command = "Wait-Process -Id ([int]$env:YTLL_UPDATE_PARENT_PID) -ErrorAction SilentlyContinue; Start-Process -FilePath $env:YTLL_UPDATE_INSTALLER_PATH";
+  const launcher = spawn(powershellPath, [
+    "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+    "-Command", command
+  ], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+    env: {
+      ...process.env,
+      YTLL_UPDATE_PARENT_PID: String(process.pid),
+      YTLL_UPDATE_INSTALLER_PATH: installerPath
+    }
+  });
+  launcher.unref();
+}
+
 async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -977,8 +1001,7 @@ if (require("electron-squirrel-startup")) {
     ipcMain.handle("update:install", async () => {
       if (!updateState.downloadedPath) return { ok: false, reason: "no-file" };
       try {
-        const { spawn } = require("child_process");
-        spawn(updateState.downloadedPath, [], { detached: true, stdio: "ignore" }).unref();
+        launchInstallerAfterExit(updateState.downloadedPath);
         app.quit();
         return { ok: true };
       } catch (error) {
