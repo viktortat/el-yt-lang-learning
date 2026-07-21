@@ -9,6 +9,7 @@ module.exports = {
       /(^|[\\/])out([\\/]|$)/,
       /(^|[\\/])\.electron-user-data([\\/]|$)/,
       /(^|[\\/])\.bun-tmp([\\/]|$)/,
+      /(^|[\\/])\.env$/,
       /bun\.lock/,
       /\.gitignore/
     ]
