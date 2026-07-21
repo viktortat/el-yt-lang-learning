@@ -108,7 +108,15 @@ async function main() {
   const exeStats = fs.statSync(exeFull);
   console.log("  Найден: " + EXE_NAME + " (" + (exeStats.size / 1024 / 1024).toFixed(1) + " MB)\n");
 
-  // 6. Создать GitHub release
+  // 6. Коммит + тэг + пуш
+  console.log("  Коммит изменений...");
+  run("git add package.json");
+  run("git commit -m \"v" + newVersion + "\"");
+  run("git tag " + tag);
+  run("git push");
+  run("git push origin " + tag);
+
+  // 7. Создать GitHub release
   console.log("  Создание релиза на GitHub...");
   const createRes = await fetch(GITHUB_API + "/repos/" + REPO + "/releases", {
     method: "POST",
@@ -134,7 +142,7 @@ async function main() {
   const releaseId = release.id;
   console.log("  Релиз создан: " + release.html_url + "\n");
 
-  // 7. Загрузить .exe как asset
+  // 8. Загрузить .exe как asset
   console.log("  Загрузка установщика...");
   const fileBuf = fs.readFileSync(exeFull);
   const uploadUrl = "https://uploads.github.com/repos/" + REPO + "/releases/" + releaseId + "/assets?name=" + encodeURIComponent(EXE_NAME);
@@ -154,14 +162,6 @@ async function main() {
     process.exit(1);
   }
   console.log("  Установщик загружен.\n");
-
-  // 8. Коммит + тэг + пуш
-  console.log("  Коммит изменений...");
-  run("git add package.json");
-  run("git commit -m \"v" + newVersion + "\"");
-  run("git tag " + tag);
-  run("git push");
-  run("git push origin " + tag);
 
   console.log("\n  Готово! Релиз: " + release.html_url);
 }
