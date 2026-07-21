@@ -1,7 +1,7 @@
 (() => {
   const app = document.querySelector("#app");
   const toast = document.querySelector("#toast");
-  const state = { library: null, libraries: null, libraryPreferencesById: {}, expandedLibraryId: "", settings: null, activeTab: "library", settingsSection: "appearance", selectedId: "root", playerVideoId: null, playerUrl: "", previewTitle: "", captions: window.LanguageModel.emptyCaptionDocument(), player: null, youTubeReady: false, expanded: new Set(["root"]), layout: JSON.parse(localStorage.getItem("ytll-layout") || '{"mode":"columns","english":true,"russian":true}') };
+  const state = { library: null, libraries: null, libraryPreferencesById: {}, expandedLibraryId: "", settings: null, activeTab: "library", settingsSection: "appearance", selectedId: "root", playerVideoId: null, playerUrl: "", previewTitle: "", captions: window.LanguageModel.emptyCaptionDocument(), player: null, playerAutoplay: false, youTubeReady: false, expanded: new Set(["root"]), layout: JSON.parse(localStorage.getItem("ytll-layout") || '{"mode":"columns","english":true,"russian":true}') };
   state.layout.leftWidth = Number(state.layout.leftWidth) || 320;
   state.layout.rightWidth = Number(state.layout.rightWidth) || 320;
   if (state.layout.mode === "columns" && !state.layout.english && !state.layout.russian) {
@@ -9,7 +9,6 @@
     state.layout.russian = true;
     localStorage.setItem("ytll-layout", JSON.stringify(state.layout));
   }
-  state.follow = { left: true, right: true };
   state.activeCaptionId = "";
   state.playerGeneration = 0;
   state.captionGeneration = 0;
@@ -143,6 +142,7 @@
     back: '<path d="M5 7v5h5"/><path d="M5.5 12a7 7 0 1 0 2-5"/>',
     forward: '<path d="M19 7v5h-5"/><path d="M18.5 12a7 7 0 1 1-2-5"/>',
     previous: '<path d="M6 5v14"/><path d="m18 6-7 6 7 6"/>',
+    next: '<path d="M18 5v14"/><path d="m6 6 7 6-7 6"/>',
     repeat: '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
     download: '<path d="M12 3v11m0 0 4-4m-4 4-4-4M5 20h14"/>',
     externalLink: '<path d="M14 5h5v5M19 5l-8 8"/><path d="M19 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>',
@@ -150,6 +150,7 @@
     edit: '<path d="m5 19 4-.8L19 8.2a2.1 2.1 0 0 0-3-3L6 15l-1 4zM14.5 6.5l3 3"/>',
     trash: '<path d="M4 7h16M10 11v5m4-5v5M6 7l1 13h10l1-13M9 7V4h6v3"/>',
     translate: '<path d="M4 5h8M8 3v2c0 4-2 7-5 9m2-5c2 2 4 3 7 3m3-7h6m-3-2v2c0 4 1.5 7 3 9m-6-4h6"/>',
+    swap: '<path d="m8 3-4 4 4 4M4 7h16m-4 14 4-4-4-4m4 4H4"/>',
     columns: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m6-16v16"/>',
     center: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 9h8m-8 3h8m-8 3h8"/>',
   };
@@ -160,6 +161,13 @@
   function activeLibrary() { return state.libraries?.libraries.find(item => item.id === state.libraries.activeId); }
   function activeLibraryId() { return state.libraries?.activeId; }
   function findParent(id) { let found; walk(state.library.root, (node, parent) => { if (node.id === id) { found = parent; return false; } }); return found; }
+  function adjacentVideos() {
+    const current = state.playerVideoId && findNode(state.playerVideoId);
+    const parent = current && findParent(current.id);
+    const videos = parent?.children?.filter(node => node.type === "video") || [];
+    const index = videos.findIndex(node => node.id === current?.id);
+    return { previous: index > 0 ? videos[index - 1] : null, next: index >= 0 && index < videos.length - 1 ? videos[index + 1] : null, available: index >= 0 };
+  }
   function selected() { return findNode(state.selectedId) || state.library.root; }
   async function saveLibrary() { state.library = await window.appAPI.saveLibrary(state.library); }
   function isLibraryEmpty() { return !(state.library?.root?.children || []).length; }
@@ -288,13 +296,27 @@
     const leftCode = state.layout.swapped ? translationCode : studyCode;
     const rightCode = state.layout.swapped ? studyCode : translationCode;
     const toolButton = (className, attributes, iconName, label) => `<button class="${className}" ${attributes} title="${label}" aria-label="${label}">${icon(iconName)}</button>`;
-    const actions = id ? `${toolButton("mode-button", 'id="loadStudyTrack"', "download", `Получить дорожку «${languageName(studyCode)}»`)}${toolButton(`mode-button ${translationReady ? "" : "needs-key"}`, 'id="createTranslationTrack"', "translate", `Создать дорожку «${languageName(translationCode)}»`)}` : "";
     const playbackControls = `${toolButton("control", 'data-player="back"', "back", "Назад на 5 секунд")}${toolButton("control", 'data-player="play"', "play", "Воспроизвести или поставить на паузу")}${toolButton("control", 'data-player="forward"', "forward", "Вперёд на 5 секунд")}<span class="controls-divider" aria-hidden="true"></span>${toolButton("control", 'data-player="previous"', "previous", "Повторить предыдущую реплику")}${toolButton("control", 'data-player="repeat"', "repeat", "Повторить текущую реплику")}`;
+    const adjacent = adjacentVideos();
+    const navigationButton = (direction, target) => {
+      const label = target ? `${direction === "previous" ? "Предыдущий" : "Следующий"} ролик: ${target.name}` : adjacent.available ? `${direction === "previous" ? "Предыдущего" : "Следующего"} ролика нет` : "Навигация доступна для роликов из библиотеки";
+      return `<button class="video-navigation-button" type="button" ${target ? `data-video-navigation="${direction}"` : "disabled"} title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${icon(direction === "previous" ? "previous" : "next")}</button>`;
+    };
+    const videoNavigation = `<nav class="video-navigation" aria-label="Переход между роликами">${navigationButton("previous", adjacent.previous)}${navigationButton("next", adjacent.next)}</nav>`;
     const leftRole = state.layout.swapped ? "translation" : "study";
     const rightRole = state.layout.swapped ? "study" : "translation";
-    const leftHead = `<div class="track-heading"><select id="${leftRole}Language" aria-label="${leftRole === "study" ? "Изучаемый язык" : "Язык перевода"}">${languageOptions(leftCode)}</select><small>${escapeHtml(trackStatus(leftTrack))}</small>${versionSelector(leftTrack, leftCode)}</div><span>${leftTrack?.segments.length || 0}</span>`;
-    const rightHead = `<div class="track-heading"><select id="${rightRole}Language" aria-label="${rightRole === "study" ? "Изучаемый язык" : "Язык перевода"}">${languageOptions(rightCode)}</select><small>${escapeHtml(trackStatus(rightTrack))}</small>${versionSelector(rightTrack, rightCode)}</div><span>${rightTrack?.segments.length || 0}</span>`;
-    return shell(`<section class="view player-view ${mode === "center" ? "center-mode" : ""}"><header class="player-head"><form class="player-link-form" id="playerLinkForm"><input name="url" value="${url}" placeholder="Вставьте YouTube-ссылку…" autocomplete="off" />${toolButton("subtle-button", 'type="submit"', "play", "Открыть ролик")}${toolButton("primary", 'type="button" id="addRootVideo"', "listPlus", "Сохранить ролик в библиотеку")}</form><div class="layout-actions">${actions}${toolButton("mode-button", 'id="swapLanguages"', "translate", "Поменять дорожки местами")}</div></header><section class="learning-stage"><aside class="caption-panel ${state.layout.english ? "" : "collapsed"}"><header class="caption-head">${leftHead}</header><div class="caption-list">${captionsMarkup(leftTrack?.segments, leftCode)}</div></aside><section class="video-zone"><h1 class="player-title">${title}</h1>${player}<div class="center-captions"><b>${escapeHtml(study?.segments[0]?.text || "Субтитры по центру")}</b>${escapeHtml(translated?.segments[0]?.text || `Создайте перевод на ${languageName(translationCode)}.`)}</div><nav class="study-controls" aria-label="Управление просмотром">${playbackControls}<span class="controls-divider" aria-hidden="true"></span>${["0.5","0.75","1","1.5","2"].map(rate => `<button class="control rate-control ${rate === "1" ? "active" : ""}" data-rate="${rate}" aria-label="Скорость ${rate}">${rate}×</button>`).join("")}</nav></section><aside class="caption-panel ${state.layout.russian ? "" : "collapsed"}"><header class="caption-head">${rightHead}</header><div class="caption-list">${captionsMarkup(rightTrack?.segments, rightCode)}</div></aside></section></section>`);
+    const panelActions = role => {
+      if (!id) return "";
+      const buttons = [];
+      if (role === "study") buttons.push(toolButton("mode-button panel-track-action", 'id="loadStudyTrack"', "download", `Получить дорожку «${languageName(studyCode)}»`));
+      if (role === "translation") {
+        buttons.push(toolButton(`mode-button panel-track-action ${translationReady ? "" : "needs-key"}`, 'id="createTranslationTrack"', "download", `Создать дорожку «${languageName(translationCode)}»`));
+      }
+      return buttons.length ? `<div class="panel-track-actions">${buttons.join("")}</div>` : "";
+    };
+    const leftHead = `<div class="track-heading"><select id="${leftRole}Language" aria-label="${leftRole === "study" ? "Изучаемый язык" : "Язык перевода"}">${languageOptions(leftCode)}</select><small>${escapeHtml(trackStatus(leftTrack))}</small>${versionSelector(leftTrack, leftCode)}</div>${panelActions(leftRole)}<span>${leftTrack?.segments.length || 0}</span>`;
+    const rightHead = `<div class="track-heading"><select id="${rightRole}Language" aria-label="${rightRole === "study" ? "Изучаемый язык" : "Язык перевода"}">${languageOptions(rightCode)}</select><small>${escapeHtml(trackStatus(rightTrack))}</small>${versionSelector(rightTrack, rightCode)}</div>${panelActions(rightRole)}<span>${rightTrack?.segments.length || 0}</span>`;
+    return shell(`<section class="view player-view ${mode === "center" ? "center-mode" : ""}"><header class="player-head"><form class="player-link-form" id="playerLinkForm"><input name="url" value="${url}" placeholder="Вставьте YouTube-ссылку…" autocomplete="off" />${toolButton("subtle-button", 'type="submit"', "play", "Открыть ролик")}${toolButton("subtle-button", 'type="button" id="swapLanguages"', "swap", "Поменять дорожки местами")}${toolButton("primary", 'type="button" id="addRootVideo"', "listPlus", "Сохранить ролик в библиотеку")}</form></header><section class="learning-stage"><aside class="caption-panel ${state.layout.english ? "" : "collapsed"}"><header class="caption-head">${leftHead}</header><div class="caption-list">${captionsMarkup(leftTrack?.segments, leftCode)}</div></aside><section class="video-zone"><h1 class="player-title">${title}</h1>${player}<div class="center-captions"><b>${escapeHtml(study?.segments[0]?.text || "Субтитры по центру")}</b>${escapeHtml(translated?.segments[0]?.text || `Создайте перевод на ${languageName(translationCode)}.`)}</div>${videoNavigation}<nav class="study-controls" aria-label="Управление просмотром">${playbackControls}<span class="controls-divider" aria-hidden="true"></span>${["0.5","0.75","1","1.5","2"].map(rate => `<button class="control rate-control ${rate === "1" ? "active" : ""}" data-rate="${rate}" aria-label="Скорость ${rate}">${rate}×</button>`).join("")}</nav></section><aside class="caption-panel ${state.layout.russian ? "" : "collapsed"}"><header class="caption-head">${rightHead}</header><div class="caption-list">${captionsMarkup(rightTrack?.segments, rightCode)}</div></aside></section></section>`);
   }
   function renderSettings() {
     const s = state.settings; const t = s.translation; const tr = s.transcription;
@@ -327,13 +349,6 @@
     list.scrollTo({ top, behavior: smooth ? "smooth" : "auto" });
   }
 
-  function setFollow(language, enabled) {
-    state.follow[language] = enabled;
-    const button = document.querySelector(`[data-follow="${language}"]`);
-    button?.classList.toggle("visible", !enabled);
-    if (enabled && state.activeCaptionId) scrollCaptionIntoView(language, state.activeCaptionId, false);
-  }
-
   function syncCaptionsToTime(time) {
     const active = currentCaption(time);
     const translatedActive = window.CaptionSync.findCurrentCaption(translationTrack()?.segments || [], Number(time));
@@ -356,8 +371,8 @@
     if ((!changed && !needsPositionRestore) || !captionId) return;
     const leftActiveId = document.querySelector('.caption-list[data-language="left"] .caption-row.active')?.dataset.captionId;
     const rightActiveId = document.querySelector('.caption-list[data-language="right"] .caption-row.active')?.dataset.captionId;
-    if (state.follow.left && leftActiveId) scrollCaptionIntoView("left", leftActiveId, false);
-    if (state.follow.right && rightActiveId) scrollCaptionIntoView("right", rightActiveId, false);
+    if (leftActiveId) scrollCaptionIntoView("left", leftActiveId, true);
+    if (rightActiveId) scrollCaptionIntoView("right", rightActiveId, true);
   }
 
   function stopCaptionSync() {
@@ -387,21 +402,8 @@
         persistLayout();
         applyPlayerLayout();
       });
-      const follow = document.createElement("button");
-      follow.type = "button";
-      follow.className = `follow-caption${state.follow[language] ? "" : " visible"}`;
-      follow.dataset.follow = language;
-      follow.textContent = "К текущей реплике";
-      follow.addEventListener("click", () => setFollow(language, true));
       if (language === "left") head.prepend(collapse);
-      head.append(follow);
       if (language === "right") head.append(collapse);
-      list.addEventListener("wheel", () => setFollow(language, false), { passive: true });
-      list.addEventListener("touchmove", () => setFollow(language, false), { passive: true });
-      list.addEventListener("pointerdown", event => {
-        const bounds = list.getBoundingClientRect();
-        if (event.clientX >= bounds.right - 18) setFollow(language, false);
-      });
     });
   }
 
@@ -492,6 +494,8 @@
     const video = state.playerVideoId && findNode(state.playerVideoId);
     const host = document.querySelector("#youtubePlayer");
     const id = youtubeId(video?.type === "video" ? video.url : state.playerUrl);
+    const shouldAutoplay = state.playerAutoplay;
+    state.playerAutoplay = false;
     const generation = ++state.playerGeneration;
     state.player = null;
     stopCaptionSync();
@@ -499,20 +503,21 @@
     if (!window.YT?.Player) {
       setTimeout(() => {
         if (generation !== state.playerGeneration || !host.isConnected || window.YT?.Player) return;
-        const source = `https://www.youtube.com/embed/${encodeURIComponent(id)}?rel=0&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`;
+        const source = `https://www.youtube.com/embed/${encodeURIComponent(id)}?rel=0&autoplay=${shouldAutoplay ? "1" : "0"}&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`;
         host.innerHTML = `<iframe src="${source}" title="YouTube" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
       }, 1500);
       return;
     }
     const player = new window.YT.Player("youtubePlayer", {
       videoId: id,
-      playerVars: { origin: window.location.origin, rel: 0, modestbranding: 1 },
+      playerVars: { origin: window.location.origin, rel: 0, modestbranding: 1, autoplay: shouldAutoplay ? 1 : 0 },
       events: {
         onReady: event => {
           if (generation !== state.playerGeneration) return;
           state.player = event.target;
           const savedTime = state.positionStore.get(id);
           if (savedTime > 0.25) event.target.seekTo(savedTime, true);
+          if (shouldAutoplay) event.target.playVideo();
           state.captionTracker.tick();
         },
         onStateChange: event => {
@@ -526,11 +531,12 @@
     startCaptionSync();
   }
   function render() { if (state.activeTab !== "player") { saveCurrentPlayerPosition(); state.playerGeneration += 1; state.player = null; stopCaptionSync(); } document.documentElement.dataset.theme = state.settings?.theme || "dark"; app.innerHTML = state.activeTab === "library" ? renderLibrary() : state.activeTab === "player" ? renderPlayerV2() : renderSettings(); bindEvents(); if (state.activeTab === "player") { setupCaptionPanels(); setupPanelResizers(); mountPlayer(); } }
-  function openPlayer(video) {
+  function openPlayer(video, autoplay = false) {
     saveCurrentPlayerPosition();
     state.playerVideoId = video.id;
     state.playerUrl = "";
     state.previewTitle = "";
+    state.playerAutoplay = autoplay;
     state.activeTab = "player";
     startCaptionSession();
     render();
@@ -551,7 +557,7 @@
       render();
       if (automaticDownload && !studyTrack()?.segments.length) {
         showToast(`Ищу на YouTube дорожку «${languageName(studyLanguage())}»…`);
-        void downloadTrackForActive(studyLanguage(), false, generation);
+        void downloadTrackForActive(studyLanguage(), generation);
       }
     } catch (error) {
       if (generation === state.captionGeneration) showToast(error.message);
@@ -618,17 +624,13 @@
     } else render();
     return captions;
   }
-  async function downloadTrackForActive(language = studyLanguage(), confirmDownload = true, expectedGeneration = state.captionGeneration) {
+  async function downloadTrackForActive(language = studyLanguage(), expectedGeneration = state.captionGeneration) {
     const context = activeCaptionContext();
     if (!context) return;
     const libraryId = activeLibraryId();
     const targetLanguage = window.LanguageModel.normalizeLanguage(language, studyLanguage());
     const jobKey = `${libraryId}:${context.key}:${targetLanguage}`;
     if (state.captionDownloads.has(jobKey)) return state.captionDownloads.get(jobKey);
-    if (confirmDownload) {
-      const approved = await showChoiceDialog({ title: "Получить дорожку", message: `Найти на YouTube субтитры «${languageName(targetLanguage)}»?`, actions: [{ label: "Продолжить", value: true, primary: true }, { label: "Отмена", value: false }] });
-      if (!approved) return;
-    }
     const job = (async () => {
       try {
         const trackInfo = await window.appAPI.getCaptionTrackInfo({ url: context.url, targetLanguage });
@@ -664,7 +666,7 @@
   }
   async function createTranslationForActive() {
     if (translationTrack()) return showToast("Выбранная дорожка уже готова");
-    return downloadTrackForActive(translationLanguage(), true);
+    return downloadTrackForActive(translationLanguage());
   }
   async function titleForUrl(url) { const result = await window.appAPI.getYoutubeMetadata(url); if (result.warning) showToast("Не удалось получить название; будет использовано «Новый урок»"); return result.title || "Новый урок"; }
   async function playUrl(url) {
@@ -1132,9 +1134,13 @@
     document.querySelector("#openYoutube")?.addEventListener("click", async () => { const url = document.querySelector("#videoForm [name=url]").value.trim(); if (!url) return showToast("Вставьте ссылку на YouTube"); try { await window.appAPI.openYoutube(url); } catch (error) { showToast(error.message); } });
     document.querySelector("#playerLinkForm")?.addEventListener("submit", event => { event.preventDefault(); playUrl(new FormData(event.currentTarget).get("url")); });
     document.querySelector("#addRootVideo")?.addEventListener("click", () => addUrlToRoot(new FormData(document.querySelector("#playerLinkForm")).get("url")));
+    document.querySelectorAll("[data-video-navigation]").forEach(button => button.addEventListener("click", () => {
+      const target = adjacentVideos()[button.dataset.videoNavigation];
+      if (target) openPlayer(target, true);
+    }));
     document.querySelector("#loadStudyTrack")?.addEventListener("click", () => downloadTrackForActive(studyLanguage()));
     document.querySelector("#createTranslationTrack")?.addEventListener("click", createTranslationForActive);
-    document.querySelector("#studyLanguage")?.addEventListener("change", async event => { const language = event.target.value === "__other__" ? await showLanguagePicker() : event.target.value; if (!language) return render(); state.captions.active.studyLanguage = language; await saveCaptionDocument(); render(); if (!studyTrack()?.segments.length) { showToast(`Ищу на YouTube дорожку «${languageName(language)}»…`); void downloadTrackForActive(language, false); } });
+    document.querySelector("#studyLanguage")?.addEventListener("change", async event => { const language = event.target.value === "__other__" ? await showLanguagePicker() : event.target.value; if (!language) return render(); state.captions.active.studyLanguage = language; await saveCaptionDocument(); render(); if (!studyTrack()?.segments.length) { showToast(`Ищу на YouTube дорожку «${languageName(language)}»…`); void downloadTrackForActive(language); } });
     document.querySelector("#translationLanguage")?.addEventListener("change", async event => { const language = event.target.value === "__other__" ? await showLanguagePicker() : event.target.value; if (!language) return render(); state.captions.active.translationLanguage = language; await saveCaptionDocument(); render(); if (!translationTrack()) showToast("Для выбранного языка нужно создать перевод"); });
     document.querySelectorAll("[data-track-version]").forEach(select => select.addEventListener("change", async () => { window.LanguageModel.setPreferredTrack(state.captions, select.dataset.trackVersion, select.value); await saveCaptionDocument(); render(); }));
     document.querySelector("#swapLanguages")?.addEventListener("click", () => { saveCurrentPlayerPosition(); state.layout.swapped = !state.layout.swapped; persistLayout(); render(); });
