@@ -6,7 +6,7 @@
 
 Якщо застосунок у ZIP-архіві — розпакуйте в окрему папку й запустіть `yt-lang-learning.exe`. Не переносьте exe окремо від решти файлів збірки.
 
-![Навчальний плеєр YT Lang Learning](../screens/study-player.png)
+![Навчальний плеєр YT Lang Learning](screens/study-player.png)
 
 ## Створення бібліотеки
 
