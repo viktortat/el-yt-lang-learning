@@ -81,7 +81,7 @@ test("translation reports progress and is deduplicated per video within a librar
   assert.match(mainSource, /captions:translation-progress/);
   assert.match(mainSource, /response_format: \{ type: "json_schema"/);
   assert.match(preloadSource, /onTranslationProgress/);
-  assert.match(appSource, /Переведено \$\{progress\.completed\} из \$\{progress\.total\}/);
+  assert.match(appSource, /Перевожу: \$\{progress\.completed\} из \$\{progress\.total\}/);
 });
 
 test("local transcription reports progress to the active video", () => {
@@ -92,5 +92,5 @@ test("local transcription reports progress to the active video", () => {
   assert.match(mainSource, /stage: "transcription"/);
   assert.match(preloadSource, /onTranscriptionProgress/);
   assert.match(appSource, /Загружено видео \$\{progress\.percent\}%/);
-  assert.match(appSource, /Распознано \$\{progress\.percent\}%/);
+  assert.match(appSource, /Whisper: распознано \$\{progress\.percent\}%/);
 });

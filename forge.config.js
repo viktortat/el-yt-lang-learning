@@ -1,6 +1,6 @@
 module.exports = {
   packagerConfig: {
-    asar: true,
+    asar: { unpack: "**/assets/bin/yt-dlp.exe" },
     executableName: "yt-lang-learning",
     icon: "./assets/yt-lang-learning.ico",
     ignore: [

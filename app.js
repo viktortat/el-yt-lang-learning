@@ -1,7 +1,8 @@
 (() => {
   const app = document.querySelector("#app");
   const toast = document.querySelector("#toast");
-  const state = { library: null, libraries: null, libraryPreferencesById: {}, expandedLibraryId: "", settings: null, activeTab: "library", settingsSection: "appearance", selectedId: "root", playerVideoId: null, playerUrl: "", previewTitle: "", captions: window.LanguageModel.emptyCaptionDocument(), player: null, playerAutoplay: false, youTubeReady: false, expanded: new Set(["root"]), layout: JSON.parse(localStorage.getItem("ytll-layout") || '{"mode":"columns","english":true,"russian":true}') };
+  const playerUrlDraftKey = "ytll-player-url-draft";
+  const state = { library: null, libraries: null, libraryPreferencesById: {}, expandedLibraryId: "", settings: null, activeTab: "library", settingsSection: "appearance", selectedId: "root", playerVideoId: null, playerUrl: localStorage.getItem(playerUrlDraftKey) || "", previewTitle: "", captions: window.LanguageModel.emptyCaptionDocument(), player: null, playerAutoplay: false, youTubeReady: false, expanded: new Set(["root"]), layout: JSON.parse(localStorage.getItem("ytll-layout") || '{"mode":"columns","english":true,"russian":true}') };
   state.layout.leftWidth = Number(state.layout.leftWidth) || 320;
   state.layout.rightWidth = Number(state.layout.rightWidth) || 320;
   if (state.layout.mode === "columns" && !state.layout.english && !state.layout.russian) {
@@ -17,6 +18,7 @@
   state.updateProgress = 0;
   state.updateDownloaded = false;
   state.captionDownloads = new Map();
+  state.captionDownloadStates = new Map();
   state.draggedNodeId = "";
   state.positionStore = window.PlaybackPosition.createStore(localStorage);
   state.captionTracker = window.CaptionSync.createTimeTracker({
@@ -33,7 +35,18 @@
   const clone = value => JSON.parse(JSON.stringify(value));
   const emptyCaptions = () => window.LanguageModel.emptyCaptionDocument(state.library?.preferences || state.settings?.languages);
   const newId = prefix => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-  const showToast = message => { toast.textContent = message; toast.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove("show"), 2600); };
+  const showToast = (message, duration = 2600) => { toast.textContent = message; toast.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove("show"), duration); };
+  function updateActiveCaptionDownloadMessage(message) {
+    const context = activeCaptionContext();
+    if (!context) return;
+    const prefix = `${activeLibraryId()}:${context.key}:`;
+    for (const key of state.captionDownloadStates.keys()) {
+      if (!key.startsWith(prefix)) continue;
+      state.captionDownloadStates.set(key, message);
+      const language = key.slice(prefix.length);
+      document.querySelector(`[data-caption-download-progress="${CSS.escape(language)}"] span`)?.replaceChildren(message);
+    }
+  }
   function showChoiceDialog({ title, message, actions }) {
     return new Promise(resolve => {
       const backdrop = document.createElement("div");
@@ -118,6 +131,13 @@
     state.captions = emptyCaptions();
     state.activeCaptionId = "";
     return state.captionGeneration;
+  }
+  function preservePlayerUrlDraft() {
+    if (state.playerVideoId) return;
+    const value = document.querySelector("#playerLinkForm [name=url]")?.value.trim();
+    if (!value) return;
+    state.playerUrl = value;
+    localStorage.setItem(playerUrlDraftKey, value);
   }
   function saveCurrentPlayerPosition() {
     try {
@@ -309,14 +329,23 @@
     const videoNavigation = `<nav class="video-navigation" aria-label="Переход между роликами">${navigationButton("previous", adjacent.previous)}${navigationButton("next", adjacent.next)}</nav>`;
     const leftRole = state.layout.swapped ? "translation" : "study";
     const rightRole = state.layout.swapped ? "study" : "translation";
+    const captionDownloadState = language => {
+      const context = activeCaptionContext();
+      if (!context) return null;
+      return state.captionDownloadStates.get(`${activeLibraryId()}:${context.key}:${language}`) || null;
+    };
     const panelActions = role => {
       if (!id) return "";
       const buttons = [];
-      if (role === "study") buttons.push(toolButton("mode-button panel-track-action", 'id="loadStudyTrack"', "download", `Получить дорожку «${languageName(studyCode)}»`));
+      const language = role === "study" ? studyCode : translationCode;
+      const progress = captionDownloadState(language);
+      const disabled = progress ? " disabled aria-busy=\"true\"" : "";
+      if (role === "study") buttons.push(toolButton(`mode-button panel-track-action ${progress ? "is-busy" : ""}`, `id="loadStudyTrack" data-caption-download="${escapeHtml(language)}"${disabled}`, "download", `Получить дорожку «${languageName(studyCode)}»`));
       if (role === "translation") {
-        buttons.push(toolButton(`mode-button panel-track-action ${translationReady ? "" : "needs-key"}`, 'id="createTranslationTrack"', "download", `Создать дорожку «${languageName(translationCode)}»`));
+        buttons.push(toolButton(`mode-button panel-track-action ${translationReady ? "" : "needs-key"} ${progress ? "is-busy" : ""}`, `id="createTranslationTrack" data-caption-download="${escapeHtml(language)}"${disabled}`, "download", `Создать дорожку «${languageName(translationCode)}»`));
       }
-      return buttons.length ? `<div class="panel-track-actions">${buttons.join("")}</div>` : "";
+      const status = progress ? `<div class="caption-download-progress" data-caption-download-progress="${escapeHtml(language)}"><span>${escapeHtml(progress)}</span><i aria-hidden="true"></i></div>` : "";
+      return buttons.length ? `<div class="panel-track-actions">${buttons.join("")}${status}</div>` : "";
     };
     const leftHead = `<div class="track-heading"><select id="${leftRole}Language" aria-label="${leftRole === "study" ? "Изучаемый язык" : "Язык перевода"}">${languageOptions(leftCode)}</select><small>${escapeHtml(trackStatus(leftTrack))}</small>${versionSelector(leftTrack, leftCode)}</div>${panelActions(leftRole)}<span>${leftTrack?.segments.length || 0}</span>`;
     const rightHead = `<div class="track-heading"><select id="${rightRole}Language" aria-label="${rightRole === "study" ? "Изучаемый язык" : "Язык перевода"}">${languageOptions(rightCode)}</select><small>${escapeHtml(trackStatus(rightTrack))}</small>${versionSelector(rightTrack, rightCode)}</div>${panelActions(rightRole)}<span>${rightTrack?.segments.length || 0}</span>`;
@@ -564,7 +593,7 @@
         void downloadTrackForActive(studyLanguage(), generation);
       }
     } catch (error) {
-      if (generation === state.captionGeneration) showToast(error.message);
+      if (generation === state.captionGeneration) showToast(error?.message || "Неизвестная ошибка");
     }
   }
   async function saveCaptionDocument() {
@@ -583,7 +612,7 @@
     render();
     return captions;
   }
-  async function recoverCaptionTrack(language, info, status, expectedGeneration) {
+  async function recoverCaptionTrack(language, info, status, expectedGeneration, onStatus = () => {}) {
     const context = activeCaptionContext();
     const source = trackFor(info.sourceLanguage || state.captions.speechLanguage || studyLanguage());
     const actions = [];
@@ -592,6 +621,7 @@
     actions.push({ label: "Выбрать локальный файл", value: "local" });
     actions.push({ label: "Отмена", value: "cancel" });
     const reason = status === "rate-limited" ? "YouTube временно ограничил запросы (429)." : "YouTube не предоставил нужную дорожку.";
+    onStatus(`${reason} Нужен другой способ создания дорожки…`);
     const decisionKey = `fallback:${language}`;
     const remembered = state.captions.decisions[decisionKey]?.choice;
     const canReuse = remembered === "whisper" || (remembered === "openrouter" && source);
@@ -599,13 +629,19 @@
     if (!choice || choice === "cancel") return null;
     state.captions.decisions[decisionKey] = { choice };
     await saveCaptionDocument();
-    if (choice === "openrouter") return translateWithOpenRouter(source.language, language, expectedGeneration);
+    if (choice === "openrouter") {
+      onStatus(`Перевожу дорожку на «${languageName(language)}» через OpenRouter…`);
+      return translateWithOpenRouter(source.language, language, expectedGeneration);
+    }
     const mediaPath = choice === "local" ? await window.appAPI.selectLocalMedia() : null;
     if (choice === "local" && !mediaPath) return null;
-    showToast("Запускаю локальное распознавание речи…");
+    const whisperStatus = mediaPath ? "Запускаю Whisper для выбранного файла…" : "Whisper: сначала загружаю видео…";
+    onStatus(whisperStatus);
+    showToast(whisperStatus);
     let captions = await window.appAPI.transcribeCaptionTrack({ videoId: context.key, url: context.url, mediaPath, language: info.sourceLanguage || "", libraryId: activeLibraryId() });
     if (expectedGeneration !== state.captionGeneration || context.youtubeId !== activeYoutubeId()) return null;
     state.captions = captions;
+    onStatus("Whisper завершил распознавание. Подготавливаю дорожку…");
     let detected = captions.speechLanguage;
     const detectedTrack = trackFor(detected);
     const threshold = Number(state.settings?.languages?.detectionThreshold) || 0.75;
@@ -624,6 +660,7 @@
     }
     if (detected && !window.LanguageModel.sameLanguage(detected, language)) {
       if (!state.settings?.translation?.hasApiKey) { render(); showToast(`Речь распознана как «${languageName(detected)}». Для перевода настройте OpenRouter.`); return captions; }
+      onStatus(`Whisper завершил распознавание. Перевожу на «${languageName(language)}»…`);
       captions = await translateWithOpenRouter(detected, language, expectedGeneration);
     } else render();
     return captions;
@@ -635,38 +672,70 @@
     const targetLanguage = window.LanguageModel.normalizeLanguage(language, studyLanguage());
     const jobKey = `${libraryId}:${context.key}:${targetLanguage}`;
     if (state.captionDownloads.has(jobKey)) return state.captionDownloads.get(jobKey);
+    const setProgress = message => {
+      state.captionDownloadStates.set(jobKey, message);
+      const button = document.querySelector(`[data-caption-download="${CSS.escape(targetLanguage)}"]`);
+      button?.toggleAttribute("disabled", true);
+      button?.setAttribute("aria-busy", "true");
+      button?.classList.add("is-busy");
+      let progress = document.querySelector(`[data-caption-download-progress="${CSS.escape(targetLanguage)}"]`);
+      if (!progress && button) {
+        progress = document.createElement("div");
+        progress.className = "caption-download-progress";
+        progress.dataset.captionDownloadProgress = targetLanguage;
+        progress.innerHTML = "<span></span><i aria-hidden=\"true\"></i>";
+        button.closest(".panel-track-actions")?.append(progress);
+      }
+      if (progress) progress.querySelector("span").textContent = message;
+    };
+    const clearProgress = () => {
+      state.captionDownloadStates.delete(jobKey);
+      const button = document.querySelector(`[data-caption-download="${CSS.escape(targetLanguage)}"]`);
+      button?.toggleAttribute("disabled", false);
+      button?.removeAttribute("aria-busy");
+      button?.classList.remove("is-busy");
+      document.querySelector(`[data-caption-download-progress="${CSS.escape(targetLanguage)}"]`)?.remove();
+    };
+    setProgress("Проверяю дорожки на YouTube…");
+    const slowCheckTimer = setTimeout(() => {
+      setProgress("YouTube отвечает дольше обычного. Жду ответ до 30 секунд…");
+    }, 8000);
     const job = (async () => {
       try {
+        showToast(`Проверяю дорожки на YouTube…`);
         const trackInfo = await window.appAPI.getCaptionTrackInfo({ url: context.url, targetLanguage });
-        if (trackInfo.status === "rate-limited") return recoverCaptionTrack(targetLanguage, trackInfo, "rate-limited", expectedGeneration);
+        clearTimeout(slowCheckTimer);
+        if (trackInfo.status === "rate-limited") {
+          setProgress("YouTube временно ограничил запросы. Выбираю следующий вариант…");
+          return recoverCaptionTrack(targetLanguage, trackInfo, "rate-limited", expectedGeneration, setProgress);
+        }
         let allowTranslatedAutomaticTrack = true;
         if (trackInfo.needsTranslatedAutomaticTrack) {
-          const decisionKey = `youtube-translation:${targetLanguage}`;
-          const previousChoice = state.captions.decisions[decisionKey];
-          if (!previousChoice || previousChoice.sourceLanguage !== trackInfo.sourceLanguage) {
-            const approved = await showChoiceDialog({ title: "Машинный перевод YouTube", message: `Язык речи — «${languageName(trackInfo.sourceLanguage)}». Загрузить машинный перевод на «${languageName(targetLanguage)}»? Решение сохранится для этого видео.`, actions: [{ label: "Загрузить", value: true, primary: true }, { label: "Не загружать", value: false }] });
-            state.captions.decisions[decisionKey] = { sourceLanguage: trackInfo.sourceLanguage, approved: Boolean(approved) };
-            await saveCaptionDocument();
-            if (!approved) return;
-          } else {
-            allowTranslatedAutomaticTrack = previousChoice.approved === true;
-            if (!allowTranslatedAutomaticTrack) return;
-          }
+          setProgress(`Найдена автоматическая дорожка на «${languageName(trackInfo.sourceLanguage)}». Загружаю перевод YouTube…`);
         }
-        showToast(`Загружаю дорожку «${languageName(targetLanguage)}»…`);
+        const downloadMessage = `Загружаю дорожку «${languageName(targetLanguage)}»…`;
+        setProgress(downloadMessage);
+        showToast(downloadMessage);
         const result = await window.appAPI.downloadCaptionTrack({ videoId: context.key, url: context.url, language: targetLanguage, libraryId, allowTranslatedAutomaticTrack });
         if (expectedGeneration !== state.captionGeneration || context.youtubeId !== activeYoutubeId()) return;
-        if (["rate-limited", "missing-track"].includes(result.status)) return recoverCaptionTrack(targetLanguage, trackInfo, result.status, expectedGeneration);
+        if (["rate-limited", "missing-track"].includes(result.status)) {
+          setProgress(result.status === "rate-limited" ? "YouTube временно ограничил запросы. Выбираю следующий вариант…" : "Подходящей дорожки нет. Выбираю следующий вариант…");
+          return recoverCaptionTrack(targetLanguage, trackInfo, result.status, expectedGeneration, setProgress);
+        }
         state.captions = result.captions;
         render();
         showToast(`Дорожка «${languageName(targetLanguage)}» готова`);
       } catch (error) {
-        if (expectedGeneration === state.captionGeneration) showToast(error.message);
+        clearTimeout(slowCheckTimer);
+        if (expectedGeneration === state.captionGeneration) showToast(error?.message || "Неизвестная ошибка", 8000);
       }
     })();
     state.captionDownloads.set(jobKey, job);
     try { return await job; }
-    finally { if (state.captionDownloads.get(jobKey) === job) state.captionDownloads.delete(jobKey); }
+    finally {
+      clearProgress();
+      if (state.captionDownloads.get(jobKey) === job) state.captionDownloads.delete(jobKey);
+    }
   }
   async function createTranslationForActive() {
     if (translationTrack()) return showToast("Выбранная дорожка уже готова");
@@ -679,6 +748,7 @@
     saveCurrentPlayerPosition();
     state.playerVideoId = null;
     state.playerUrl = cleanUrl;
+    localStorage.setItem(playerUrlDraftKey, cleanUrl);
     state.previewTitle = "Загрузка названия…";
     const generation = startCaptionSession();
     render();
@@ -1137,6 +1207,12 @@
     document.querySelector("#videoForm")?.addEventListener("submit", async event => { event.preventDefault(); const data = new FormData(event.currentTarget); const video = selected(); video.name = data.get("name").trim(); video.url = data.get("url").trim(); await saveLibrary(); showToast("Свойства ролика сохранены"); render(); }); document.querySelector("#openPlayer")?.addEventListener("click", () => openPlayer(selected()));
     document.querySelector("#openYoutube")?.addEventListener("click", async () => { const url = document.querySelector("#videoForm [name=url]").value.trim(); if (!url) return showToast("Вставьте ссылку на YouTube"); try { await window.appAPI.openYoutube(url); } catch (error) { showToast(error.message); } });
     document.querySelector("#playerLinkForm")?.addEventListener("submit", event => { event.preventDefault(); playUrl(new FormData(event.currentTarget).get("url")); });
+    document.querySelector("#playerLinkForm [name=url]")?.addEventListener("input", event => {
+      if (state.playerVideoId) return;
+      state.playerUrl = event.currentTarget.value.trim();
+      if (state.playerUrl) localStorage.setItem(playerUrlDraftKey, state.playerUrl);
+      else localStorage.removeItem(playerUrlDraftKey);
+    });
     document.querySelector("#addRootVideo")?.addEventListener("click", () => addUrlToRoot(new FormData(document.querySelector("#playerLinkForm")).get("url")));
     document.querySelectorAll("[data-video-navigation]").forEach(button => button.addEventListener("click", () => {
       const target = adjacentVideos()[button.dataset.videoNavigation];
@@ -1144,8 +1220,8 @@
     }));
     document.querySelector("#loadStudyTrack")?.addEventListener("click", () => downloadTrackForActive(studyLanguage()));
     document.querySelector("#createTranslationTrack")?.addEventListener("click", createTranslationForActive);
-    document.querySelector("#studyLanguage")?.addEventListener("change", async event => { const language = event.target.value === "__other__" ? await showLanguagePicker() : event.target.value; if (!language) return render(); state.captions.active.studyLanguage = language; await saveCaptionDocument(); render(); if (!studyTrack()?.segments.length) { showToast(`Ищу на YouTube дорожку «${languageName(language)}»…`); void downloadTrackForActive(language); } });
-    document.querySelector("#translationLanguage")?.addEventListener("change", async event => { const language = event.target.value === "__other__" ? await showLanguagePicker() : event.target.value; if (!language) return render(); state.captions.active.translationLanguage = language; await saveCaptionDocument(); render(); if (!translationTrack()) showToast("Для выбранного языка нужно создать перевод"); });
+    document.querySelector("#studyLanguage")?.addEventListener("change", async event => { preservePlayerUrlDraft(); const language = event.target.value === "__other__" ? await showLanguagePicker() : event.target.value; if (!language) return render(); state.captions.active.studyLanguage = language; await saveCaptionDocument(); render(); if (!studyTrack()?.segments.length) { showToast(`Ищу на YouTube дорожку «${languageName(language)}»…`); void downloadTrackForActive(language); } });
+    document.querySelector("#translationLanguage")?.addEventListener("change", async event => { preservePlayerUrlDraft(); const language = event.target.value === "__other__" ? await showLanguagePicker() : event.target.value; if (!language) return render(); state.captions.active.translationLanguage = language; await saveCaptionDocument(); render(); if (!translationTrack()) showToast("Для выбранного языка нужно создать перевод"); });
     document.querySelectorAll("[data-track-version]").forEach(select => select.addEventListener("change", async () => { window.LanguageModel.setPreferredTrack(state.captions, select.dataset.trackVersion, select.value); await saveCaptionDocument(); render(); }));
     document.querySelector("#swapLanguages")?.addEventListener("click", () => { saveCurrentPlayerPosition(); state.layout.swapped = !state.layout.swapped; persistLayout(); render(); });
     document.querySelectorAll("[data-caption-start]").forEach(button => button.addEventListener("click", () => playerCommand("seek", button.dataset.captionStart)));
@@ -1225,14 +1301,42 @@
   window.addEventListener("load", () => { if (window.YT?.Player && !state.youTubeReady) onYouTubeIframeAPIReady(); });
   window.appAPI.onTranslationProgress?.(progress => {
     const context = activeCaptionContext();
-    if (context?.key === progress.videoId) showToast(`Переведено ${progress.completed} из ${progress.total} реплик…`);
+    if (context?.key !== progress.videoId) return;
+    if (progress.stage === "completed") {
+      const prefix = `${activeLibraryId()}:${context.key}:`;
+      for (const key of state.captionDownloadStates.keys()) {
+        if (!key.startsWith(prefix)) continue;
+        state.captionDownloadStates.delete(key);
+      }
+      window.appAPI.getCaptions(context.key, activeLibraryId()).then(captions => {
+        const currentContext = activeCaptionContext();
+        if (currentContext?.key !== progress.videoId) return;
+        state.captions = captions;
+        render();
+        showToast("Перевод готов");
+      }).catch(error => showToast(error?.message || "Не удалось обновить готовую дорожку", 8000));
+      return;
+    }
+    const message = `Перевожу: ${progress.completed} из ${progress.total} реплик…`;
+    updateActiveCaptionDownloadMessage(message);
+    showToast(message);
   });
   window.appAPI.onTranscriptionProgress?.(progress => {
     const context = activeCaptionContext();
     if (context?.key !== progress.videoId) return;
-    if (progress.stage === "download") showToast(`Загружено видео ${progress.percent}%…`);
-    else if (progress.stage === "transcription-start") showToast("Видео загружено. Запускаю faster-whisper…");
-    else showToast(`Распознано ${progress.percent}%…`);
+    if (progress.stage === "download") {
+      updateActiveCaptionDownloadMessage(`Whisper: загружено видео ${progress.percent}%…`);
+      showToast(`Загружено видео ${progress.percent}%…`);
+    } else if (progress.stage === "transcription-start") {
+      updateActiveCaptionDownloadMessage("Видео загружено. Запускаю Whisper…");
+      showToast("Видео загружено. Запускаю faster-whisper…");
+    } else {
+      const message = progress.percent >= 100
+        ? "Whisper завершил распознавание. Подготавливаю дорожку…"
+        : `Whisper: распознано ${progress.percent}%…`;
+      updateActiveCaptionDownloadMessage(message);
+      showToast(message);
+    }
   });
   async function checkForUpdateOnStart() {
     try {

@@ -3,9 +3,9 @@ const http = require("http");
 const path = require("path");
 const os = require("os");
 const { spawn } = require("child_process");
-const { mkdirSync } = require("fs");
+const { existsSync, mkdirSync } = require("fs");
 const { appendFile, copyFile, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } = require("fs/promises");
-const { downloadVideoArgs, transcriberArgs, captionsFromTranscript, hasVtt, createProgressParser } = require("./transcription-plan");
+const { downloadVideoArgs, transcriberArgs, captionsFromTranscript, createProgressParser } = require("./transcription-plan");
 const { normalizeCaptionSegments } = require("./caption-parser");
 const { translationsFromModel } = require("./translation-response");
 const {
@@ -28,6 +28,7 @@ let libraries;
 let settings;
 let rendererServer;
 const captionJobs = new Map();
+const captionTrackInfoCache = new Map();
 const userDataDirectory = path.join(process.env.LOCALAPPDATA || app.getPath("appData"), APP_NAME);
 
 mkdirSync(userDataDirectory, { recursive: true });
@@ -322,7 +323,7 @@ async function replaceLibraryFromBundle(bundle, libraryId = libraries.activeId) 
   return next.library;
 }
 
-function run(command, args, cwd, onOutput = () => {}) {
+function run(command, args, cwd, onOutput = () => {}, timeout = 0) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
@@ -334,19 +335,18 @@ function run(command, args, cwd, onOutput = () => {}) {
     child.stderr.on("data", chunk => { const output = chunk.toString(); stderr += output; onOutput(output); });
     child.on("error", error => reject(error));
     child.on("close", code => code === 0 ? resolve() : reject(new Error(stderr.trim() || `${command} завершился с кодом ${code}`)));
+    if (timeout > 0) {
+      const timer = setTimeout(() => { child.kill(); reject(new Error(`${command} превысил лимит времени (${timeout / 1000} с).`)); }, timeout);
+      child.on("close", () => clearTimeout(timer));
+    }
   });
 }
 
-async function runYtDlp(args, cwd, onOutput = () => {}) {
-  try {
-    await run(settings.transcription.ytDlpPath, args, cwd, onOutput);
-  } catch (error) {
-    if (error.code !== "ENOENT" || settings.transcription.ytDlpPath !== "yt-dlp") throw error;
-    await run("python", ["-m", "yt_dlp", ...args], cwd, onOutput);
-  }
+async function runYtDlp(args, cwd, onOutput = () => {}, timeout = 0) {
+  await run(ytDlpExecutable(), args, cwd, onOutput, timeout);
 }
 
-function runCapture(command, args, cwd) {
+function runCapture(command, args, cwd, timeout = 0) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
@@ -359,27 +359,42 @@ function runCapture(command, args, cwd) {
     child.stderr.on("data", chunk => { stderr += chunk.toString(); });
     child.on("error", reject);
     child.on("close", code => code === 0 ? resolve(stdout) : reject(new Error(stderr.trim() || `${command} завершился с кодом ${code}`)));
+    if (timeout > 0) {
+      const timer = setTimeout(() => { child.kill(); reject(new Error(`${command} превысил лимит времени (${timeout / 1000} с).`)); }, timeout);
+      child.on("close", () => clearTimeout(timer));
+    }
   });
 }
 
-async function runYtDlpCapture(args, cwd) {
-  try {
-    return await runCapture(settings.transcription.ytDlpPath, args, cwd);
-  } catch (error) {
-    if (error.code !== "ENOENT" || settings.transcription.ytDlpPath !== "yt-dlp") throw error;
-    return runCapture("python", ["-m", "yt_dlp", ...args], cwd);
-  }
+function ytDlpExecutable() {
+  const configured = String(settings?.transcription?.ytDlpPath || "").trim();
+  if (configured && configured !== "yt-dlp") return configured;
+  const relativePath = path.join("assets", "bin", "yt-dlp.exe");
+  const executablePath = app.isPackaged
+    ? path.join(process.resourcesPath, "app.asar.unpacked", relativePath)
+    : path.join(__dirname, relativePath);
+  if (!existsSync(executablePath)) throw new Error("Встроенный yt-dlp.exe не найден. Переустановите приложение.");
+  return executablePath;
+}
+
+async function runYtDlpCapture(args, cwd, timeout = 0) {
+  return runCapture(ytDlpExecutable(), args, cwd, timeout);
 }
 
 async function captionTrackInfo({ url, targetLanguage }) {
-  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "ytll-caption-info-"));
+  const youtubeUrl = normalizeYoutubeUrl(url);
   const target = normalizeLanguage(targetLanguage, library?.preferences?.studyLanguage || settings.languages.studyLanguage);
+  const cacheKey = `${youtubeUrl}\n${target}`;
+  const cached = captionTrackInfoCache.get(cacheKey);
+  if (cached?.expiresAt > Date.now()) return cached.value;
+  captionTrackInfoCache.delete(cacheKey);
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "ytll-caption-info-"));
   try {
     let output;
     try {
       output = await runYtDlpCapture([
-        "--skip-download", "--dump-single-json", "--no-warnings", "--ignore-no-formats-error", url
-      ], temporaryDirectory);
+        "--skip-download", "--dump-single-json", "--no-warnings", "--ignore-no-formats-error", youtubeUrl
+      ], temporaryDirectory, 30000);
     } catch (error) {
       if (/HTTP Error 429/i.test(error.message)) return { status: "rate-limited", sourceLanguage: null, targetLanguage: target, manualTracks: [], hasManualTrack: false, hasAutomaticTrack: false, needsTranslatedAutomaticTrack: false };
       throw error;
@@ -390,14 +405,30 @@ async function captionTrackInfo({ url, targetLanguage }) {
     const sourceLanguage = normalizeLanguage(metadata.language) || null;
     const hasManualTrack = manualTracks.some(language => sameLanguage(language, target));
     const hasAutomaticTrack = automaticTracks.some(language => sameLanguage(language, target));
-    return {
+    const findTrack = tracks => {
+      const language = Object.keys(tracks).find(item => item === target)
+        || Object.keys(tracks).find(item => sameLanguage(item, target));
+      const formats = language ? tracks[language] : [];
+      const format = formats?.find(item => item.ext === "vtt") || formats?.find(item => item.url);
+      return format?.url ? { language, url: format.url } : null;
+    };
+    const manualTrack = findTrack(metadata.subtitles || {});
+    const automaticTrack = findTrack(metadata.automatic_captions || {});
+    const result = {
       sourceLanguage,
       targetLanguage: target,
       manualTracks,
       hasManualTrack,
       hasAutomaticTrack,
-      needsTranslatedAutomaticTrack: !hasManualTrack && hasAutomaticTrack && !!sourceLanguage && !sameLanguage(sourceLanguage, target)
+      needsTranslatedAutomaticTrack: !hasManualTrack && hasAutomaticTrack && !!sourceLanguage && !sameLanguage(sourceLanguage, target),
+      captionTrack: manualTrack ? { ...manualTrack, source: "youtube-manual" } : automaticTrack ? { ...automaticTrack, source: "youtube-auto" } : null,
+      requestHeaders: {
+        "User-Agent": metadata.http_headers?.["User-Agent"] || "Mozilla/5.0",
+        "Accept-Language": metadata.http_headers?.["Accept-Language"] || "en-US,en;q=0.5"
+      }
     };
+    captionTrackInfoCache.set(cacheKey, { value: result, expiresAt: Date.now() + 5 * 60 * 1000 });
+    return result;
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
@@ -409,7 +440,7 @@ async function playlistVideos(url) {
   try {
     const output = await runYtDlpCapture([
       "--flat-playlist", "--dump-single-json", "--skip-download", "--no-warnings", playlistUrl
-    ], temporaryDirectory);
+    ], temporaryDirectory, 30000);
     const entries = JSON.parse(output).entries || [];
     const seen = new Set();
     return entries.flatMap(entry => {
@@ -447,72 +478,35 @@ function parseVtt(content, language = "und") {
   return normalizeCaptionSegments(segments, baseLanguage(language) || "seg");
 }
 
-function chooseLanguageVtt(files, language) {
-  const base = baseLanguage(language);
-  return files.find(file => file.endsWith(`.${language}-orig.vtt`))
-    || files.find(file => file.endsWith(`.${language}.vtt`))
-    || files.find(file => file.endsWith(`.${base}-orig.vtt`))
-    || files.find(file => file.endsWith(`.${base}.vtt`))
-    || files.find(file => file.endsWith(".vtt"));
-}
-
 function nextTrackRevision(captions, language, source) {
   return Object.values(captions.tracks).filter(track => sameLanguage(track.language, language) && track.source === source).reduce((maximum, track) => Math.max(maximum, track.revision), 0) + 1;
 }
 
 async function downloadCaptionTrack({ videoId, url, language, libraryId = libraries.activeId, allowTranslatedAutomaticTrack = true }) {
   const targetLanguage = normalizeLanguage(language, libraryPreferences(libraryId).studyLanguage);
-  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "ytll-captions-"));
-  try {
-    const output = path.join(temporaryDirectory, "caption.%(ext)s");
-    let source = "youtube-manual";
-    try {
-      // Авторские дорожки надёжнее и реже получают rate limit от YouTube.
-      await runYtDlp([
-        "--skip-download", "--write-subs", "--sub-langs", `${targetLanguage},${targetLanguage}.*`, "--sub-format", "vtt", "--convert-subs", "vtt",
-        "-o", output, url
-      ], temporaryDirectory);
-    } catch {}
-    let files = await readdir(temporaryDirectory);
-    if (!hasVtt(files)) {
-      if (!allowTranslatedAutomaticTrack) return { status: "translated-auto-track-not-approved" };
-      source = "youtube-auto";
-      // yt-dlp возвращает код 0 даже когда ручной дорожки нет, поэтому
-      // fallback определяется по фактически созданному VTT-файлу.
-      try {
-        await runYtDlp([
-          "--skip-download", "--write-auto-subs", "--sub-langs", `${targetLanguage}-orig,${targetLanguage}`, "--sub-format", "vtt", "--convert-subs", "vtt",
-          "-o", output, url
-        ], temporaryDirectory);
-      } catch (error) {
-        if (/HTTP Error 429/i.test(error.message)) return { status: "rate-limited" };
-        throw error;
-      }
-      files = await readdir(temporaryDirectory);
-    }
-    const vtt = chooseLanguageVtt(files, targetLanguage);
-    if (!vtt) return { status: "missing-track" };
-    const segments = parseVtt(await readFile(path.join(temporaryDirectory, vtt), "utf8"), targetLanguage);
-    if (!segments.length) throw new Error("В найденной дорожке нет реплик.");
-    const captions = await loadCaptions(videoId, libraryId);
-    const info = await captionTrackInfo({ url, targetLanguage }).catch(() => ({ sourceLanguage: null }));
-    captions.speechLanguage = info.sourceLanguage || captions.speechLanguage || targetLanguage;
-    const translated = captions.speechLanguage && !sameLanguage(captions.speechLanguage, targetLanguage);
-    if (translated) source = "youtube-translation";
-    const sourceTrack = translated ? preferredTrack(captions, captions.speechLanguage) : null;
-    addTrack(captions, makeTrack({
-      language: targetLanguage,
-      source,
-      kind: translated ? "translation" : "source",
-      sourceTrackId: sourceTrack?.id || null,
-      revision: nextTrackRevision(captions, targetLanguage, source),
-      segments
-    }));
-    captions.active.studyLanguage ||= targetLanguage;
-    return { status: "ok", captions: await saveCaptions(videoId, captions, libraryId) };
-  } finally {
-    await rm(temporaryDirectory, { recursive: true, force: true });
-  }
+  const info = await captionTrackInfo({ url, targetLanguage });
+  if (!info.captionTrack) return { status: "missing-track" };
+  if (info.needsTranslatedAutomaticTrack && !allowTranslatedAutomaticTrack) return { status: "translated-auto-track-not-approved" };
+  const response = await fetch(info.captionTrack.url, { headers: info.requestHeaders, signal: AbortSignal.timeout(30000) });
+  if (response.status === 429) return { status: "rate-limited" };
+  if (!response.ok) throw new Error(`YouTube не отдал субтитры: HTTP ${response.status}.`);
+  const segments = parseVtt(await response.text(), targetLanguage);
+  if (!segments.length) throw new Error("В найденной дорожке нет реплик.");
+  const captions = await loadCaptions(videoId, libraryId);
+  captions.speechLanguage = info.sourceLanguage || captions.speechLanguage || targetLanguage;
+  const translated = captions.speechLanguage && !sameLanguage(captions.speechLanguage, targetLanguage);
+  const source = translated ? "youtube-translation" : info.captionTrack.source;
+  const sourceTrack = translated ? preferredTrack(captions, captions.speechLanguage) : null;
+  addTrack(captions, makeTrack({
+    language: targetLanguage,
+    source,
+    kind: translated ? "translation" : "source",
+    sourceTrackId: sourceTrack?.id || null,
+    revision: nextTrackRevision(captions, targetLanguage, source),
+    segments
+  }));
+  captions.active.studyLanguage ||= targetLanguage;
+  return { status: "ok", captions: await saveCaptions(videoId, captions, libraryId) };
 }
 
 async function transcribeCaptionTrack({ videoId, url, mediaPath, language = "", libraryId = libraries.activeId }, onProgress = () => {}) {
@@ -524,7 +518,7 @@ async function transcribeCaptionTrack({ videoId, url, mediaPath, language = "", 
       const parseDownloadProgress = createProgressParser("download");
       await runYtDlp(downloadVideoArgs(sourceTemplate, url), temporaryDirectory, output => {
         for (const percent of parseDownloadProgress(output)) onProgress({ videoId, stage: "download", percent });
-      });
+      }, 120000);
       const downloadedFiles = await readdir(temporaryDirectory);
       const sourceFile = downloadedFiles.find(file => /\.(mp4|mkv|webm|mov|m4v)$/i.test(file));
       if (!sourceFile) throw new Error("Не удалось скачать временное видео для локального распознавания.");
@@ -535,7 +529,7 @@ async function transcribeCaptionTrack({ videoId, url, mediaPath, language = "", 
       await run("ffmpeg", [
         "-y", "-f", "lavfi", "-i", "color=c=black:s=320x240:r=1",
         "-i", inputPath, "-shortest", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", videoContainer
-      ], temporaryDirectory);
+      ], temporaryDirectory, undefined, 60000);
       inputPath = videoContainer;
     }
     const sourceFile = path.basename(inputPath);
@@ -633,8 +627,9 @@ async function translateCaptionTrack({ videoId, sourceLanguage, targetLanguage, 
   }
   const source = "openrouter";
   addTrack(captions, makeTrack({ language: target, source, kind: "translation", sourceTrackId: sourceTrack.id, revision: nextTrackRevision(captions, target, source), segments: translatedSegments }));
-  captions.active.translationLanguage = target;
-  return saveCaptions(videoId, captions, libraryId);
+  const savedCaptions = await saveCaptions(videoId, captions, libraryId);
+  onProgress({ videoId, completed: translatedSegments.length, total: sourceTrack.segments.length, stage: "completed" });
+  return savedCaptions;
 }
 
 function publicSettings() {
