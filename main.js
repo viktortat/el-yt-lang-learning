@@ -9,7 +9,7 @@ const { downloadVideoArgs, transcriberArgs, captionsFromTranscript, createProgre
 const { normalizeCaptionSegments } = require("./caption-parser");
 const { translationsFromModel } = require("./translation-response");
 const {
-  normalizeLanguage, baseLanguage, sameLanguage, normalizeLanguageSettings,
+  SUPPORTED_LANGUAGES, normalizeLanguage, baseLanguage, sameLanguage, normalizeLanguageSettings,
   normalizeLibraryPreferences, emptyCaptionDocument, normalizeCaptionDocument,
   makeTrack, addTrack, preferredTrack
 } = require("./language-model");
@@ -104,6 +104,9 @@ function defaultSettings() {
       encryptedApiKey: ""
     },
     transcription: {
+      provider: "groq",
+      groqModel: "whisper-large-v3-turbo",
+      encryptedGroqApiKey: "",
       modelRoot: "C:\\Users\\viktor\\.cache\\ai-models\\faster-whisper",
       model: "large-v3-turbo",
       uvPath: "uv",
@@ -632,20 +635,111 @@ async function translateCaptionTrack({ videoId, sourceLanguage, targetLanguage, 
   return savedCaptions;
 }
 
+function detectedLanguage(value, fallback = "") {
+  const normalized = normalizeLanguage(value);
+  if (normalized) return normalized;
+  const name = String(value || "").trim().toLowerCase();
+  if (name) {
+    const displayNames = new Intl.DisplayNames(["en"], { type: "language" });
+    const matched = SUPPORTED_LANGUAGES.find(code => displayNames.of(code)?.toLowerCase() === name);
+    if (matched) return matched;
+  }
+  return normalizeLanguage(fallback, "und");
+}
+
+function groqFallbackError(status, message) {
+  const error = new Error(`GROQ_FALLBACK: ${message}`);
+  error.status = status;
+  return error;
+}
+
+async function transcribeCaptionTrackWithGroq({ videoId, url, mediaPath, language = "", libraryId = libraries.activeId }, onProgress = () => {}) {
+  if (!settings.transcription.encryptedGroqApiKey) throw new Error("В настройках не указан ключ Groq.");
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "ytll-groq-"));
+  try {
+    let inputPath = mediaPath;
+    if (!inputPath) {
+      const sourceTemplate = path.join(temporaryDirectory, "source.%(ext)s");
+      const parseDownloadProgress = createProgressParser("download");
+      await runYtDlp(downloadVideoArgs(sourceTemplate, url), temporaryDirectory, output => {
+        for (const percent of parseDownloadProgress(output)) onProgress({ videoId, provider: "groq", stage: "download", percent });
+      }, 120000);
+      const downloadedFiles = await readdir(temporaryDirectory);
+      const sourceFile = downloadedFiles.find(file => /\.(mp4|mkv|webm|mov|m4v|mp3|m4a|wav|flac|ogg)$/i.test(file));
+      if (!sourceFile) throw new Error("Не удалось подготовить медиафайл для Groq.");
+      inputPath = path.join(temporaryDirectory, sourceFile);
+    }
+    onProgress({ videoId, provider: "groq", stage: "transcription-start", percent: 0 });
+    const apiKey = safeStorage.decryptString(Buffer.from(settings.transcription.encryptedGroqApiKey, "base64"));
+    const form = new FormData();
+    const contents = await readFile(inputPath);
+    const mediaType = ({ ".flac": "audio/flac", ".mp3": "audio/mpeg", ".mp4": "video/mp4", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".wav": "audio/wav", ".webm": "video/webm" })[path.extname(inputPath).toLowerCase()] || "application/octet-stream";
+    form.append("file", new Blob([contents], { type: mediaType }), path.basename(inputPath));
+    form.append("model", "whisper-large-v3-turbo");
+    form.append("response_format", "verbose_json");
+    form.append("timestamp_granularities[]", "segment");
+    const requestedLanguage = normalizeLanguage(language);
+    if (requestedLanguage) form.append("language", baseLanguage(requestedLanguage));
+    let response;
+    try {
+      response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+        method: "POST",
+        signal: AbortSignal.timeout(600000),
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form
+      });
+    } catch (error) {
+      throw groqFallbackError(0, error.name === "TimeoutError" ? "Groq не ответил вовремя." : "Не удалось подключиться к Groq.");
+    }
+    let payload = null;
+    try { payload = await response.json(); } catch {}
+    if (!response.ok) {
+      const detail = String(payload?.error?.message || "").trim();
+      if (response.status === 408 || response.status === 413 || response.status === 429 || response.status >= 500) {
+        throw groqFallbackError(response.status, detail || `Groq ответил с кодом ${response.status}.`);
+      }
+      if (response.status === 401 || response.status === 403) throw new Error("Groq отклонил API-ключ. Проверьте ключ в настройках.");
+      throw new Error(detail || `Groq ответил с кодом ${response.status}.`);
+    }
+    const speechLanguage = detectedLanguage(payload?.language, requestedLanguage);
+    const segments = captionsFromTranscript(payload, speechLanguage);
+    if (!segments.length) throw new Error("Groq Whisper не распознал речь в видео.");
+    const captions = await loadCaptions(videoId, libraryId);
+    captions.speechLanguage = speechLanguage;
+    const source = "groq";
+    addTrack(captions, makeTrack({ language: speechLanguage, source, revision: nextTrackRevision(captions, speechLanguage, source), segments }));
+    onProgress({ videoId, provider: "groq", stage: "transcription", percent: 100 });
+    return saveCaptions(videoId, captions, libraryId);
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
 function publicSettings() {
   const copy = JSON.parse(JSON.stringify(settings));
   copy.translation.hasApiKey = Boolean(copy.translation.encryptedApiKey);
   delete copy.translation.encryptedApiKey;
+  copy.transcription.hasGroqApiKey = Boolean(copy.transcription.encryptedGroqApiKey);
+  delete copy.transcription.encryptedGroqApiKey;
   return copy;
 }
 
-function storeSettings(next, submittedApiKey) {
+function storeSettings(next, submittedApiKey, submittedGroqApiKey) {
   const normalized = normalizeSettings(next);
   normalized.translation.encryptedApiKey = settings.translation.encryptedApiKey;
+  normalized.transcription.encryptedGroqApiKey = settings.transcription.encryptedGroqApiKey;
   if (submittedApiKey !== undefined) {
     if (!submittedApiKey) normalized.translation.encryptedApiKey = "";
     else if (safeStorage.isEncryptionAvailable()) {
       normalized.translation.encryptedApiKey = safeStorage.encryptString(submittedApiKey).toString("base64");
+    } else {
+      throw new Error("Шифрование ключа недоступно в этой Windows-среде.");
+    }
+  }
+  if (submittedGroqApiKey !== undefined) {
+    if (!submittedGroqApiKey) normalized.transcription.encryptedGroqApiKey = "";
+    else if (safeStorage.isEncryptionAvailable()) {
+      normalized.transcription.encryptedGroqApiKey = safeStorage.encryptString(submittedGroqApiKey).toString("base64");
     } else {
       throw new Error("Шифрование ключа недоступно в этой Windows-среде.");
     }
@@ -799,6 +893,11 @@ if (require("electron-squirrel-startup")) {
       await shell.openExternal(url);
       return { url };
     });
+    ipcMain.handle("groq:open-api-keys", async () => {
+      const url = "https://console.groq.com/keys";
+      await shell.openExternal(url);
+      return { url };
+    });
     ipcMain.handle("library:get", () => library);
     ipcMain.handle("libraries:get", () => libraries);
     ipcMain.handle("libraries:preferences", async () => Object.fromEntries(await Promise.all(libraries.libraries.map(async item => {
@@ -930,13 +1029,13 @@ if (require("electron-squirrel-startup")) {
       return result.canceled ? null : result.filePaths[0];
     });
     ipcMain.handle("captions:transcribe-track", (event, payload) => oncePerCaptionJob(
-      `whisper:${payload.libraryId}:${payload.videoId}`,
-      () => transcribeCaptionTrack(payload, progress => event.sender.send("captions:transcription-progress", progress))
+      `${payload.provider === "groq" ? "groq" : "whisper"}:${payload.libraryId}:${payload.videoId}`,
+      () => (payload.provider === "groq" ? transcribeCaptionTrackWithGroq : transcribeCaptionTrack)(payload, progress => event.sender.send("captions:transcription-progress", progress))
     ));
     ipcMain.handle("captions:translate-track", (event, payload) => oncePerCaptionJob(`translate:${payload.libraryId}:${payload.videoId}:${payload.targetLanguage}`, () => translateCaptionTrack(payload, progress => event.sender.send("captions:translation-progress", progress))));
     ipcMain.handle("settings:get", () => publicSettings());
     ipcMain.handle("settings:save", async (_event, payload) => {
-      settings = storeSettings(payload.settings, payload.apiKey);
+      settings = storeSettings(payload.settings, payload.apiKey, payload.groqApiKey);
       await writeJson(settingsPath(), settings);
       return publicSettings();
     });
@@ -944,6 +1043,8 @@ if (require("electron-squirrel-startup")) {
       const result = defaultSettings();
       delete result.translation.encryptedApiKey;
       result.translation.hasApiKey = false;
+      delete result.transcription.encryptedGroqApiKey;
+      result.transcription.hasGroqApiKey = false;
       return result;
     });
 

@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld("appAPI", {
   getPlaylistVideos: url => ipcRenderer.invoke("youtube:playlist-videos", url),
   openYoutube: url => ipcRenderer.invoke("youtube:open-external", url),
   openOpenRouterApiKeys: () => ipcRenderer.invoke("openrouter:open-api-keys"),
+  openGroqApiKeys: () => ipcRenderer.invoke("groq:open-api-keys"),
   getCaptions: (videoId, libraryId) => ipcRenderer.invoke("captions:get", videoId, libraryId),
   saveCaptions: (videoId, captions, libraryId) => ipcRenderer.invoke("captions:save", videoId, captions, libraryId),
   getCaptionTrackInfo: payload => ipcRenderer.invoke("captions:track-info", payload),

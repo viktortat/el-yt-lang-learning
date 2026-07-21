@@ -78,7 +78,7 @@ With the player focused:
 
 Translation requires an OpenRouter API key. The app sends the caption text to the selected model, not the video. Windows encrypts the key when system encryption is available. Old translations are marked stale when you redownload the source track.
 
-If the caption track is not available on YouTube, the app can use local speech recognition. It needs a faster-whisper model, `uv`, and `yt-dlp`. The video downloads only after confirmation and is cleaned up after processing. Local media files need `ffmpeg` as well.
+If the caption track is not available on YouTube, the app can transcribe it through Groq with `whisper-large-v3-turbo` or use local faster-whisper. Groq needs an API key; local recognition needs a downloaded model, `uv`, and `yt-dlp`. The video downloads only after confirmation and is cleaned up after processing. Local media files need `ffmpeg` as well.
 
 ## Limits
 
@@ -86,6 +86,7 @@ If the caption track is not available on YouTube, the app can use local speech r
 - Some videos may not play when the owner blocks embedding.
 - Caption availability depends on what YouTube provides for each video.
 - Translation needs an OpenRouter account, API key, and access to the selected model.
+- Cloud transcription needs a Groq account, API key, and an internet connection.
 - Local transcription requires separate tools and a downloaded model.
 
 ## Documentation and licence

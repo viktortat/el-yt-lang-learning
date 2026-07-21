@@ -52,7 +52,7 @@
     return new Promise(resolve => {
       const backdrop = document.createElement("div");
       backdrop.className = "dialog-backdrop";
-      backdrop.innerHTML = `<section class="dialog-card choice-dialog" role="dialog" aria-modal="true" aria-labelledby="choiceTitle"><h2 id="choiceTitle">${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p><div class="form-actions">${actions.map((action, index) => `<button type="button" class="${action.primary ? "primary" : "subtle-button"}" data-choice="${index}">${escapeHtml(action.label)}</button>`).join("")}</div></section>`;
+      backdrop.innerHTML = `<section class="dialog-card choice-dialog" role="dialog" aria-modal="true" aria-labelledby="choiceTitle"><h2 id="choiceTitle">${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p><div class="form-actions">${actions.map((action, index) => `<button type="button" class="${action.primary ? "primary" : "subtle-button"}${action.icon ? " choice-icon-button" : ""}" data-choice="${index}" title="${escapeHtml(action.label)}" aria-label="${escapeHtml(action.label)}">${action.icon ? icon(action.icon) : escapeHtml(action.label)}</button>`).join("")}</div></section>`;
       const onKeydown = event => { if (event.key === "Escape") finish(null); };
       const finish = value => { document.removeEventListener("keydown", onKeydown); backdrop.remove(); resolve(value); };
       backdrop.addEventListener("click", event => { if (event.target === backdrop) finish(null); });
@@ -175,6 +175,12 @@
     edit: '<path d="m5 19 4-.8L19 8.2a2.1 2.1 0 0 0-3-3L6 15l-1 4zM14.5 6.5l3 3"/>',
     trash: '<path d="M4 7h16M10 11v5m4-5v5M6 7l1 13h10l1-13M9 7V4h6v3"/>',
     translate: '<path d="M4 5h8M8 3v2c0 4-2 7-5 9m2-5c2 2 4 3 7 3m3-7h6m-3-2v2c0 4 1.5 7 3 9m-6-4h6"/>',
+    openrouter: '<g transform="scale(.046875)" fill="currentColor" stroke="currentColor"><path d="M3 248.945C18 248.945 76 236 106 219C136 202 136 202 198 158C276.497 102.293 332 120.945 423 120.945" fill="none" stroke-width="90"/><path d="M511 121.5 357.25 210.268V32.732z" stroke="none"/><path d="M0 249C15 249 73 261.945 103 278.945C133 295.945 133 295.945 195 339.945C273.497 395.652 329 377 420 377" fill="none" stroke-width="90"/><path d="m508 376.445-153.75-88.767v177.535z" stroke="none"/></g>',
+    cloud: '<path d="M17.5 19H7a5 5 0 1 1 1.8-9.7A6 6 0 0 1 20 12a3.5 3.5 0 0 1-2.5 7z"/>',
+    cpu: '<rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4"/>',
+    fileVideo: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5"/><path class="icon-solid" d="m10 12 5 3-5 3z"/>',
+    check: '<path d="m5 12 4 4L19 6"/>',
+    close: '<path d="M6 6l12 12M18 6 6 18"/>',
     swap: '<path d="m8 3-4 4 4 4M4 7h16m-4 14 4-4-4-4m4 4H4"/>',
     columns: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m6-16v16"/>',
     center: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 9h8m-8 3h8m-8 3h8"/>',
@@ -294,12 +300,13 @@
   }
   function trackStatus(track) {
     if (!track) return "Нет дорожки";
-    const sources = { "youtube-manual": "YouTube · авторская", "youtube-auto": "YouTube · автоматическая", "youtube-translation": "YouTube · машинный перевод", whisper: "Whisper · язык речи", openrouter: "OpenRouter · перевод", legacy: "Импортированная" };
+    const sources = { "youtube-manual": "YouTube · авторская", "youtube-auto": "YouTube · автоматическая", "youtube-translation": "YouTube · машинный перевод", groq: "Groq · Whisper Large V3 Turbo", whisper: "Локальный Whisper · язык речи", openrouter: "OpenRouter · перевод", legacy: "Импортированная" };
     return `${sources[track.source] || track.source}${track.stale ? " · устарела" : ""}${track.userEdited ? " · исправлена" : ""}`;
   }
   function versionSelector(track, language) {
     const versions = window.LanguageModel.tracksForLanguage(state.captions, language);
-    if (versions.length < 2) return "";
+    const distinctSources = new Set(versions.map(item => trackStatus(item)));
+    if (versions.length < 2 || distinctSources.size < 2) return "";
     return `<select class="track-version" data-track-version="${escapeHtml(language)}" aria-label="Версия дорожки">${versions.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === track?.id ? "selected" : ""}>${escapeHtml(trackStatus(item))} · v${item.revision}</option>`).join("")}</select>`;
   }
   function renderPlayerV2() {
@@ -617,16 +624,18 @@
     const context = activeCaptionContext();
     const source = trackFor(info.sourceLanguage || state.captions.speechLanguage || studyLanguage());
     const actions = [];
-    if (source && !window.LanguageModel.sameLanguage(source.language, language) && state.settings?.translation?.hasApiKey) actions.push({ label: "Перевести через OpenRouter", value: "openrouter", primary: true });
-    actions.push({ label: "Распознать через Whisper", value: "whisper", primary: !actions.length });
-    actions.push({ label: "Выбрать локальный файл", value: "local" });
-    actions.push({ label: "Отмена", value: "cancel" });
+    if (source && !window.LanguageModel.sameLanguage(source.language, language) && state.settings?.translation?.hasApiKey) actions.push({ label: "Перевести через OpenRouter", value: "openrouter", icon: "openrouter", primary: true });
+    const defaultProvider = state.settings?.transcription?.provider === "groq" ? "groq" : "whisper";
+    if (state.settings?.transcription?.hasGroqApiKey) actions.push({ label: "Groq · Whisper Large V3 Turbo", value: "groq", icon: "cloud", primary: !actions.length && defaultProvider === "groq" });
+    actions.push({ label: "Локальный Whisper", value: "whisper", icon: "cpu", primary: !actions.length || (!actions.some(action => action.primary) && defaultProvider === "whisper") });
+    actions.push({ label: "Локальный файл через Whisper", value: "local", icon: "fileVideo" });
+    actions.push({ label: "Отмена", value: "cancel", icon: "close" });
     const reason = status === "rate-limited" ? "YouTube временно ограничил запросы (429)." : "YouTube не предоставил нужную дорожку.";
     onStatus(`${reason} Нужен другой способ создания дорожки…`);
     const decisionKey = `fallback:${language}`;
     const remembered = state.captions.decisions[decisionKey]?.choice;
-    const canReuse = remembered === "whisper" || (remembered === "openrouter" && source);
-    const choice = canReuse ? remembered : await showChoiceDialog({ title: "Не удалось получить субтитры", message: `${reason} Можно распознать язык речи локально и затем создать перевод. Выбор сохранится для этого видео.`, actions });
+    const canReuse = remembered === "whisper" || (remembered === "groq" && state.settings?.transcription?.hasGroqApiKey) || (remembered === "openrouter" && source);
+    let choice = canReuse ? remembered : await showChoiceDialog({ title: "Не удалось получить субтитры", message: `${reason} Выберите облачное или локальное распознавание. Выбор сохранится для этого видео.`, actions });
     if (!choice || choice === "cancel") return null;
     state.captions.decisions[decisionKey] = { choice };
     await saveCaptionDocument();
@@ -636,18 +645,38 @@
     }
     const mediaPath = choice === "local" ? await window.appAPI.selectLocalMedia() : null;
     if (choice === "local" && !mediaPath) return null;
-    const whisperStatus = mediaPath ? "Запускаю Whisper для выбранного файла…" : "Whisper: сначала загружаю видео…";
+    let provider = choice === "groq" ? "groq" : "local";
+    const whisperStatus = mediaPath ? "Запускаю локальный Whisper для выбранного файла…" : provider === "groq" ? "Groq: сначала загружаю видео…" : "Локальный Whisper: сначала загружаю видео…";
     onStatus(whisperStatus);
     showToast(whisperStatus);
-    let captions = await window.appAPI.transcribeCaptionTrack({ videoId: context.key, url: context.url, mediaPath, language: info.sourceLanguage || "", libraryId: activeLibraryId() });
+    let captions;
+    try {
+      captions = await window.appAPI.transcribeCaptionTrack({ videoId: context.key, url: context.url, mediaPath, language: info.sourceLanguage || "", libraryId: activeLibraryId(), provider });
+    } catch (error) {
+      if (provider === "groq" && /Groq.*API-ключ/i.test(error.message)) {
+        state.activeTab = "settings";
+        state.settingsSection = "transcription";
+        render();
+        showToast(error.message, 8000);
+        return null;
+      }
+      if (provider !== "groq" || !/GROQ_FALLBACK:/.test(error.message)) throw error;
+      const fallback = await showChoiceDialog({ title: "Groq временно недоступен", message: `${error.message.replace(/^.*GROQ_FALLBACK:\s*/, "")} Запустить локальный Whisper?`, actions: [{ label: "Запустить локально", value: "local", icon: "cpu", primary: true }, { label: "Отмена", value: "cancel", icon: "close" }] });
+      if (fallback !== "local") return null;
+      provider = "local";
+      onStatus("Запускаю локальный Whisper…");
+      showToast("Запускаю локальный Whisper…");
+      captions = await window.appAPI.transcribeCaptionTrack({ videoId: context.key, url: context.url, mediaPath, language: info.sourceLanguage || "", libraryId: activeLibraryId(), provider });
+    }
     if (expectedGeneration !== state.captionGeneration || context.youtubeId !== activeYoutubeId()) return null;
     state.captions = captions;
-    onStatus("Whisper завершил распознавание. Подготавливаю дорожку…");
+    const providerLabel = provider === "groq" ? "Groq" : "Локальный Whisper";
+    onStatus(`${providerLabel} завершил распознавание. Подготавливаю дорожку…`);
     let detected = captions.speechLanguage;
     const detectedTrack = trackFor(detected);
     const threshold = Number(state.settings?.languages?.detectionThreshold) || 0.75;
     if (detectedTrack?.confidence != null && detectedTrack.confidence < threshold) {
-      const answer = await showChoiceDialog({ title: "Проверьте язык речи", message: `Whisper предполагает «${languageName(detected)}» с уверенностью ${Math.round(detectedTrack.confidence * 100)}%.`, actions: [{ label: "Подтвердить", value: "confirm", primary: true }, { label: "Выбрать другой", value: "other" }, { label: "Отмена", value: "cancel" }] });
+      const answer = await showChoiceDialog({ title: "Проверьте язык речи", message: `Whisper предполагает «${languageName(detected)}» с уверенностью ${Math.round(detectedTrack.confidence * 100)}%.`, actions: [{ label: "Подтвердить", value: "confirm", icon: "check", primary: true }, { label: "Выбрать другой", value: "other", icon: "edit" }, { label: "Отмена", value: "cancel", icon: "close" }] });
       if (answer === "cancel" || !answer) { render(); return captions; }
       if (answer === "other") {
         const selectedLanguage = await showLanguagePicker();
@@ -661,7 +690,7 @@
     }
     if (detected && !window.LanguageModel.sameLanguage(detected, language)) {
       if (!state.settings?.translation?.hasApiKey) { render(); showToast(`Речь распознана как «${languageName(detected)}». Для перевода настройте OpenRouter.`); return captions; }
-      onStatus(`Whisper завершил распознавание. Перевожу на «${languageName(language)}»…`);
+      onStatus(`${providerLabel} завершил распознавание. Перевожу на «${languageName(language)}»…`);
       captions = await translateWithOpenRouter(detected, language, expectedGeneration);
     } else render();
     return captions;
@@ -1279,22 +1308,42 @@
         enabledLanguagesSelect.dispatchEvent(new Event("change", { bubbles: true }));
       });
     }
-    document.querySelector("#settingsForm")?.addEventListener("submit", async event => { event.preventDefault(); const form = new FormData(event.currentTarget); const apiKey = form.get("apiKey"); const payload = { settings: clone(state.settings), apiKey: apiKey ? apiKey : undefined }; payload.settings.theme = form.get("theme"); payload.settings.onboarding.defaultLibraryOfferEnabled = form.get("defaultLibraryOfferEnabled") === "on"; payload.settings.languages = { enabled: form.getAll("enabledLanguages"), studyLanguage: form.get("studyLanguage"), translationLanguage: form.get("translationLanguage"), detectionThreshold: Number(form.get("detectionThreshold")) }; payload.settings.translation.model = form.get("model").trim(); Object.assign(payload.settings.transcription, { modelRoot: form.get("modelRoot").trim(), model: form.get("whisperModel").trim(), uvPath: form.get("uvPath").trim(), ytDlpPath: form.get("ytDlpPath").trim() }); try { state.settings = await window.appAPI.saveSettings(payload); showToast("Настройки сохранены"); render(); } catch (error) { showToast(error.message); } }); document.querySelector("#resetSettings")?.addEventListener("click", async () => { if (!confirm("Сбросить настройки?")) return; state.settings = await window.appAPI.getDefaultSettings(); render(); showToast("Черновик настроек сброшен"); });
-    const apiKeyInput = document.querySelector('#settingsForm [name="apiKey"]');
-    if (apiKeyInput) {
+    const transcriptionPanel = document.querySelector('[data-settings-panel="transcription"]');
+    if (transcriptionPanel) {
+      transcriptionPanel.querySelector("h2").textContent = "Транскрибация";
+      document.querySelector('[data-settings-section="transcription"]').textContent = "Транскрибация";
+      const transcription = state.settings.transcription;
+      const keyHint = transcription.hasGroqApiKey ? "Ключ сохранён в зашифрованном виде. Оставьте пустым, чтобы не менять." : "Ключ ещё не сохранён.";
+      transcriptionPanel.querySelector("h2").insertAdjacentHTML("afterend", `<label class="settings-row"><span><strong>Способ по умолчанию</strong><small>Применяется к облачному и локальному распознаванию.</small></span><select name="transcriptionProvider"><option value="groq" ${transcription.provider === "groq" ? "selected" : ""}>Groq</option><option value="local" ${transcription.provider !== "groq" ? "selected" : ""}>Локальный Whisper</option></select></label><h3 class="settings-subhead">Groq</h3><label class="settings-row"><span><strong>API-ключ Groq</strong><small>${escapeHtml(keyHint)}</small></span><input name="groqApiKey" type="password" placeholder="gsk_…" autocomplete="new-password" /></label><label class="settings-row"><span><strong>Модель Groq</strong><small>Фиксированная модель для облачного распознавания.</small></span><input name="groqModel" value="whisper-large-v3-turbo" readonly /></label><h3 class="settings-subhead">Локальный Whisper</h3>`);
+    }
+    document.querySelector("#settingsForm")?.addEventListener("submit", async event => { event.preventDefault(); const form = new FormData(event.currentTarget); const apiKeyInput = event.currentTarget.elements.apiKey; const groqApiKeyInput = event.currentTarget.elements.groqApiKey; const apiKey = apiKeyInput?.dataset.savedKey === "true" ? undefined : form.get("apiKey"); const groqApiKey = groqApiKeyInput?.dataset.savedKey === "true" ? undefined : form.get("groqApiKey"); const payload = { settings: clone(state.settings), apiKey: apiKey ? apiKey : undefined, groqApiKey: groqApiKey ? groqApiKey : undefined }; payload.settings.theme = form.get("theme"); payload.settings.onboarding.defaultLibraryOfferEnabled = form.get("defaultLibraryOfferEnabled") === "on"; payload.settings.languages = { enabled: form.getAll("enabledLanguages"), studyLanguage: form.get("studyLanguage"), translationLanguage: form.get("translationLanguage"), detectionThreshold: Number(form.get("detectionThreshold")) }; payload.settings.translation.model = form.get("model").trim(); Object.assign(payload.settings.transcription, { provider: form.get("transcriptionProvider"), groqModel: "whisper-large-v3-turbo", modelRoot: form.get("modelRoot").trim(), model: form.get("whisperModel").trim(), uvPath: form.get("uvPath").trim(), ytDlpPath: form.get("ytDlpPath").trim() }); try { state.settings = await window.appAPI.saveSettings(payload); showToast("Настройки сохранены"); render(); } catch (error) { showToast(error.message); } }); document.querySelector("#resetSettings")?.addEventListener("click", async () => { if (!confirm("Сбросить настройки?")) return; state.settings = await window.appAPI.getDefaultSettings(); render(); showToast("Черновик настроек сброшен"); });
+    const attachApiKeyAction = (name, title, openKeys, hasSavedKey = false) => {
+      const apiKeyInput = document.querySelector(`#settingsForm [name="${name}"]`);
+      if (!apiKeyInput) return;
+      if (hasSavedKey) {
+        apiKeyInput.value = "••••••••••••••••";
+        apiKeyInput.dataset.savedKey = "true";
+      }
       const wrapper = document.createElement("div");
       wrapper.className = "settings-input-action";
       apiKeyInput.replaceWith(wrapper);
       wrapper.append(apiKeyInput);
+      apiKeyInput.addEventListener("focus", () => {
+        if (apiKeyInput.dataset.savedKey !== "true") return;
+        apiKeyInput.value = "";
+        delete apiKeyInput.dataset.savedKey;
+      }, { once: true });
       const openApiKeys = document.createElement("button");
       openApiKeys.type = "button";
       openApiKeys.className = "subtle-button folder-action";
-      openApiKeys.title = "Открыть ключи OpenRouter в браузере";
+      openApiKeys.title = title;
       openApiKeys.setAttribute("aria-label", openApiKeys.title);
       openApiKeys.innerHTML = icon("externalLink");
-      openApiKeys.addEventListener("click", () => window.appAPI.openOpenRouterApiKeys());
+      openApiKeys.addEventListener("click", openKeys);
       wrapper.append(openApiKeys);
-    }
+    };
+    attachApiKeyAction("apiKey", "Открыть ключи OpenRouter в браузере", () => window.appAPI.openOpenRouterApiKeys(), state.settings.translation.hasApiKey);
+    attachApiKeyAction("groqApiKey", "Открыть ключи Groq в браузере", () => window.appAPI.openGroqApiKeys(), state.settings.transcription.hasGroqApiKey);
   }
 
   const onYouTubeIframeAPIReady = () => { state.youTubeReady = true; if (state.activeTab === "player") render(); };
@@ -1325,16 +1374,17 @@
   window.appAPI.onTranscriptionProgress?.(progress => {
     const context = activeCaptionContext();
     if (context?.key !== progress.videoId) return;
+    const providerLabel = progress.provider === "groq" ? "Groq" : "Локальный Whisper";
     if (progress.stage === "download") {
-      updateActiveCaptionDownloadMessage(`Whisper: загружено видео ${progress.percent}%…`);
+      updateActiveCaptionDownloadMessage(`${providerLabel}: загружено видео ${progress.percent}%…`);
       showToast(`Загружено видео ${progress.percent}%…`);
     } else if (progress.stage === "transcription-start") {
-      updateActiveCaptionDownloadMessage("Видео загружено. Запускаю Whisper…");
-      showToast("Видео загружено. Запускаю faster-whisper…");
+      updateActiveCaptionDownloadMessage(`Видео загружено. Запускаю ${providerLabel}…`);
+      showToast(progress.provider === "groq" ? "Отправляю видео в Groq…" : "Видео загружено. Запускаю faster-whisper…");
     } else {
       const message = progress.percent >= 100
-        ? "Whisper завершил распознавание. Подготавливаю дорожку…"
-        : `Whisper: распознано ${progress.percent}%…`;
+        ? `${providerLabel} завершил распознавание. Подготавливаю дорожку…`
+        : `${providerLabel}: распознано ${progress.percent}%…`;
       updateActiveCaptionDownloadMessage(message);
       showToast(message);
     }

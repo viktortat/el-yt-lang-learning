@@ -84,13 +84,17 @@ test("translation reports progress and is deduplicated per video within a librar
   assert.match(appSource, /Перевожу: \$\{progress\.completed\} из \$\{progress\.total\}/);
 });
 
-test("local transcription reports progress to the active video", () => {
+test("Groq and local transcription report progress to the active video", () => {
   assert.match(mainSource, /captions:transcription-progress/);
+  assert.match(mainSource, /https:\/\/api\.groq\.com\/openai\/v1\/audio\/transcriptions/);
+  assert.match(mainSource, /form\.append\("model", "whisper-large-v3-turbo"\)/);
+  assert.match(mainSource, /response\.status === 413 \|\| response\.status === 429 \|\| response\.status >= 500/);
   assert.match(mainSource, /PYTHONUNBUFFERED: "1"/);
   assert.match(mainSource, /parseDownloadProgress/);
   assert.match(mainSource, /stage: "download"/);
   assert.match(mainSource, /stage: "transcription"/);
   assert.match(preloadSource, /onTranscriptionProgress/);
   assert.match(appSource, /Загружено видео \$\{progress\.percent\}%/);
-  assert.match(appSource, /Whisper: распознано \$\{progress\.percent\}%/);
+  assert.match(appSource, /\$\{providerLabel\}: распознано \$\{progress\.percent\}%/);
+  assert.match(appSource, /Groq временно недоступен/);
 });
