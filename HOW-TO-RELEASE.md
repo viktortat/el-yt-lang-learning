@@ -1,32 +1,85 @@
 # Как выпустить релиз
 
-## 1. Подготовить токен
+## 1. Подготовить токен GitHub
 
-Создай файл `.env` в корне проекта, напиши туда:
+Создай в корне проекта файл `.env` по образцу `.env.example`:
 
-```
+```dotenv
 GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 ```
 
-Токен взять [здесь](https://github.com/settings/tokens/new), нужна галочка `repo`.
+Для classic personal access token нужна область доступа `repo`. Создать токен можно на странице [GitHub Personal Access Tokens](https://github.com/settings/tokens/new).
 
-## 2. Запустить скрипт
+Не добавляй `.env` в Git. Файл исключён и из репозитория, и из упакованного приложения. Если токен попал в лог, коммит или опубликованный установщик, отзови его и создай новый.
+
+## 2. Проверить состояние проекта
+
+Релиз нужно запускать из чистой, синхронизированной ветки `main`:
 
 ```powershell
-bun run release          # следующая версия: 0.0.28 → 0.0.29
-bun run release patch    # то же самое
-bun run release minor    # 0.0.28 → 0.1.0
-bun run release major    # 0.0.28 → 1.0.0
+git status --short --branch
+git pull --ff-only
 ```
 
-Скрипт сам сделает всё:
+Перед продолжением `git status --short --branch` должен показывать только:
 
-- увеличит версию в `package.json`
-- запустит тесты
-- соберёт `.exe` установщик
-- создаст релиз на GitHub и прикрепит файл
-- закоммитит и запушит изменения с тэгом `v0.0.29`
+```text
+## main...origin/main
+```
 
-## 3. Написать описание релиза
+Это важно: установщик собирается из текущих файлов, а release-скрипт добавляет в релизный коммит только `package.json`. Незакоммиченные изменения могут попасть в `.exe`, но не попасть в Git.
 
-После пуша скрипта зайди на [github.com/viktortat/el-yt-lang-learning/releases](https://github.com/viktortat/el-yt-lang-learning/releases), нажми ✏️ Edit у свежего релиза и напиши, что изменилось.
+## 3. Проверить сборку и содержимое пакета
+
+```powershell
+bun run test
+bun run package
+
+$asar = & .\node_modules\.bin\asar.exe list .\out\yt-lang-learning-win32-x64\resources\app.asar
+$asar | Select-String '\\(app|main|preload|player-controls|player-layout)\.js$|\\index\.html$'
+$asar | Select-String '(^|\\)\.env$'
+```
+
+Первая проверка должна вывести `app.js`, `index.html`, `main.js`, `player-controls.js`, `player-layout.js` и `preload.js`. Вторая не должна вывести ничего: `.env` не должен находиться внутри `app.asar`.
+
+## 4. Запустить релиз
+
+```powershell
+bun run release          # patch: 0.0.31 -> 0.0.32
+bun run release patch    # то же самое
+bun run release minor    # 0.0.31 -> 0.1.0
+bun run release major    # 0.0.31 -> 1.0.0
+```
+
+Скрипт последовательно:
+
+1. увеличит версию в `package.json`;
+2. запустит тесты;
+3. соберёт Windows-установщик;
+4. создаст релизный коммит и тег;
+5. отправит ветку и тег в GitHub;
+6. создаст GitHub Release и загрузит `yt-lang-learning-setup.exe`.
+
+После завершения проверь ссылку, которую напечатает скрипт, и наличие установщика в Assets.
+
+## 5. Заполнить описание релиза
+
+Открой [страницу релизов проекта](https://github.com/viktortat/el-yt-lang-learning/releases), нажми **Edit** у нового релиза и перечисли пользовательские изменения.
+
+## Если релиз завершился с ошибкой
+
+Не запускай `bun run release` повторно вслепую: каждый запуск снова увеличивает версию.
+
+- Если ошибка произошла до релизного коммита и тега, верни изменение версии командой `git restore package.json`, устрани причину и запусти релиз заново.
+- Если уже появились коммит, тег или GitHub Release, сначала проверь `git status`, `git log -1`, `git tag --points-at HEAD` и страницу релизов. Затем либо заверши публикацию этой же версии вручную, либо удали неполный релиз и тег перед повторной попыткой.
+- Если Squirrel сообщает `Can not access a closed Stream`, удали только сгенерированный каталог `out/make/squirrel.windows/x64`, затем повтори сборку. Каталоги `out/` и `node_modules/` вручную не редактируй.
+
+После релиза итоговая проверка должна подтвердить чистый репозиторий и тег на текущем коммите:
+
+```powershell
+git status --short --branch
+git rev-parse HEAD
+git rev-parse vX.Y.Z
+```
+
+Последние две команды должны вывести один и тот же хеш.

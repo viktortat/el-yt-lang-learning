@@ -2,6 +2,7 @@
   const app = document.querySelector("#app");
   const toast = document.querySelector("#toast");
   const playerUrlDraftKey = "ytll-player-url-draft";
+  const userGuideUrl = "https://github.com/viktortat/el-yt-lang-learning/blob/main/Docs/guide-users.md";
   const state = { library: null, libraries: null, libraryPreferencesById: {}, expandedLibraryId: "", settings: null, activeTab: "library", settingsSection: "appearance", selectedId: "root", playerVideoId: null, playerUrl: localStorage.getItem(playerUrlDraftKey) || "", previewTitle: "", captions: window.LanguageModel.emptyCaptionDocument(), player: null, playerAutoplay: false, youTubeReady: false, expanded: new Set(["root"]), layout: JSON.parse(localStorage.getItem("ytll-layout") || '{"mode":"columns","english":true,"russian":true}') };
   state.layout.leftWidth = Number(state.layout.leftWidth) || 320;
   state.layout.rightWidth = Number(state.layout.rightWidth) || 320;
@@ -1353,7 +1354,7 @@
     const info = state.updateAvailable;
     const backdrop = document.createElement("div");
     backdrop.className = "dialog-backdrop";
-    backdrop.innerHTML = `<section class="dialog-card update-dialog" role="dialog" aria-modal="true"><h2>Доступно обновление v${escapeHtml(info.version)}</h2><div class="update-body"><p>${escapeHtml(info.body || "Нет описания.").replace(/\n/g, "<br>")}</p></div><div class="form-actions"><button type="button" class="primary" id="updateConfirmBtn">Обновить</button><button type="button" class="subtle-button" data-cancel>Позже</button></div></section>`;
+    backdrop.innerHTML = `<section class="dialog-card update-dialog" role="dialog" aria-modal="true"><h2>Доступно обновление v${escapeHtml(info.version)}</h2><div class="update-body"><p>${escapeHtml(info.body || "Нет описания.").replace(/\n/g, "<br>")}</p></div><div class="form-actions"><a class="subtle-button update-guide-link" href="${userGuideUrl}" target="_blank" rel="noreferrer">${icon("externalLink")}<span>Документация</span></a><button type="button" class="primary" id="updateConfirmBtn">Обновить</button><button type="button" class="subtle-button" data-cancel>Позже</button></div></section>`;
     const finish = () => { backdrop.remove(); };
     backdrop.addEventListener("click", event => { if (event.target === backdrop) finish(); });
     backdrop.querySelector("[data-cancel]").addEventListener("click", finish);
