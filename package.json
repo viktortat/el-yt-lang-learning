@@ -1,6 +1,6 @@
 {
   "name": "yt-lang-learning",
-  "version": "0.0.22",
+  "version": "0.0.23",
   "description": "Приложение для изучения языков по YouTube-видео.",
   "main": "main.js",
   "scripts": {

@@ -3,7 +3,8 @@ const http = require("http");
 const path = require("path");
 const os = require("os");
 const { spawn } = require("child_process");
-const { appendFile, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } = require("fs/promises");
+const { mkdirSync } = require("fs");
+const { appendFile, copyFile, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } = require("fs/promises");
 const { downloadVideoArgs, transcriberArgs, captionsFromTranscript, hasVtt, chooseEnglishVtt, createProgressParser } = require("./transcription-plan");
 const { normalizeCaptionSegments } = require("./caption-parser");
 const { translationsFromModel } = require("./translation-response");
@@ -17,14 +18,17 @@ let library;
 let settings;
 let rendererServer;
 const captionJobs = new Map();
+const userDataDirectory = path.join(process.env.LOCALAPPDATA || app.getPath("appData"), APP_NAME);
 
-app.setPath(
-  "userData",
-  path.join(process.env.LOCALAPPDATA || app.getPath("appData"), APP_NAME)
-);
+mkdirSync(userDataDirectory, { recursive: true });
+app.setPath("userData", userDataDirectory);
+app.commandLine.appendSwitch("disk-cache-dir", path.join(userDataDirectory, "Cache"));
+
+const singleInstanceLock = app.requestSingleInstanceLock();
+if (!singleInstanceLock) app.quit();
 
 function dataDirectory() {
-  return app.isPackaged ? path.dirname(process.execPath) : __dirname;
+  return app.isPackaged ? app.getPath("userData") : __dirname;
 }
 
 function libraryPath() { return path.join(dataDirectory(), "library.json"); }
@@ -34,6 +38,16 @@ function captionsPath(videoId) { return path.join(dataDirectory(), "captions", `
 function backupsDirectory() { return path.join(dataDirectory(), "library-backups"); }
 function diagnosticPath() { return path.join(app.getPath("userData"), "renderer-debug.log"); }
 function logDiagnostic(message) { appendFile(diagnosticPath(), `${new Date().toISOString()} ${message}\n`).catch(() => {}); }
+
+async function pathExists(filePath) {
+  try {
+    await stat(filePath);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+}
 
 function newId(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -123,7 +137,57 @@ async function readJson(filePath, fallback) {
   }
 }
 
+async function copyIfExists(sourcePath, targetPath) {
+  if (!await pathExists(sourcePath) || await pathExists(targetPath)) return false;
+  await mkdir(path.dirname(targetPath), { recursive: true });
+  const sourceStats = await stat(sourcePath);
+  if (sourceStats.isDirectory()) {
+    await cp(sourcePath, targetPath, { recursive: true, errorOnExist: true, force: false });
+  } else {
+    await copyFile(sourcePath, targetPath);
+  }
+  return true;
+}
+
+async function oldPackagedDataDirectories() {
+  if (!app.isPackaged) return [];
+  const currentDirectory = path.dirname(process.execPath);
+  const installDirectory = path.dirname(currentDirectory);
+  let entries = [];
+  try { entries = await readdir(installDirectory, { withFileTypes: true }); }
+  catch (error) { if (error.code !== "ENOENT") throw error; }
+
+  const directories = [currentDirectory];
+  for (const entry of entries) {
+    if (entry.isDirectory() && /^app-\d+\.\d+\.\d+/.test(entry.name)) directories.push(path.join(installDirectory, entry.name));
+  }
+  return [...new Set(directories)].filter(directory => directory !== dataDirectory());
+}
+
+async function migratePackagedDataToUserData() {
+  if (!app.isPackaged || await pathExists(libraryPath())) return;
+
+  const candidates = [];
+  for (const directory of await oldPackagedDataDirectories()) {
+    const sourceLibraryPath = path.join(directory, "library.json");
+    if (await pathExists(sourceLibraryPath)) {
+      candidates.push({ directory, modifiedTime: (await stat(sourceLibraryPath)).mtimeMs });
+    }
+  }
+  candidates.sort((left, right) => right.modifiedTime - left.modifiedTime);
+
+  const sourceDirectory = candidates[0]?.directory;
+  if (!sourceDirectory) return;
+
+  await copyIfExists(path.join(sourceDirectory, "library.json"), libraryPath());
+  await copyIfExists(path.join(sourceDirectory, "settings.json"), settingsPath());
+  await copyIfExists(path.join(sourceDirectory, "captions"), path.join(dataDirectory(), "captions"));
+  await copyIfExists(path.join(sourceDirectory, "library-backups"), backupsDirectory());
+  logDiagnostic(`migrated packaged data from ${sourceDirectory}`);
+}
+
 async function loadData() {
+  await migratePackagedDataToUserData();
   library = normalizeLibrary(await readJson(libraryPath(), defaultLibrary));
   settings = normalizeSettings(await readJson(settingsPath(), defaultSettings));
 }
