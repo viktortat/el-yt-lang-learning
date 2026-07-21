@@ -44,11 +44,13 @@ $asar | Select-String '(^|\\)\.env$'
 
 ## 4. Запустить релиз
 
+Перед публикацией подготовь украинское описание релиза по изменениям от более старой из двух предыдущих версий до текущего `HEAD`. Пиши кратко и понятно для обычного пользователя: обычно достаточно 3-6 пунктов без имён внутренних файлов и функций. Сохрани итоговый Markdown вне репозитория, например в `$env:TEMP`, чтобы рабочее дерево осталось чистым.
+
 ```powershell
-bun run release          # patch: 0.0.31 -> 0.0.32
-bun run release patch    # то же самое
-bun run release minor    # 0.0.31 -> 0.1.0
-bun run release major    # 0.0.31 -> 1.0.0
+bun run release --notes $env:TEMP\yt-lang-learning-release-notes-v0.0.32.md          # patch: 0.0.31 -> 0.0.32
+bun run release patch --notes $env:TEMP\yt-lang-learning-release-notes-v0.0.32.md    # то же самое
+bun run release minor --notes $env:TEMP\yt-lang-learning-release-notes-v0.1.0.md     # 0.0.31 -> 0.1.0
+bun run release major --notes $env:TEMP\yt-lang-learning-release-notes-v1.0.0.md     # 0.0.31 -> 1.0.0
 ```
 
 Скрипт последовательно:
@@ -58,13 +60,9 @@ bun run release major    # 0.0.31 -> 1.0.0
 3. соберёт Windows-установщик;
 4. создаст релизный коммит и тег;
 5. отправит ветку и тег в GitHub;
-6. создаст GitHub Release и загрузит `yt-lang-learning-setup.exe`.
+6. создаст GitHub Release с описанием из `--notes` и загрузит `yt-lang-learning-setup.exe`.
 
 После завершения проверь ссылку, которую напечатает скрипт, и наличие установщика в Assets.
-
-## 5. Заполнить описание релиза
-
-Открой [страницу релизов проекта](https://github.com/viktortat/el-yt-lang-learning/releases), нажми **Edit** у нового релиза и перечисли пользовательские изменения.
 
 ## Если релиз завершился с ошибкой
 

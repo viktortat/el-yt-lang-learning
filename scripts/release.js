@@ -13,6 +13,7 @@
 //   node scripts/release.js patch     # +0.0.1
 //   node scripts/release.js minor     # +0.1.0
 //   node scripts/release.js major     # +1.0.0
+//   node scripts/release.js patch --notes release-notes.md
 
 const fs = require("fs");
 const path = require("path");
@@ -53,6 +54,69 @@ function writeJson(p, obj) {
   fs.writeFileSync(p, JSON.stringify(obj, null, 2) + "\n", "utf8");
 }
 
+function parseArgs(argv) {
+  let type = "patch";
+  let notesFile = null;
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--notes") {
+      if (!argv[i + 1] || argv[i + 1].startsWith("-")) {
+        console.error("  После --notes укажи путь к Markdown-файлу с описанием релиза.");
+        process.exit(1);
+      }
+      notesFile = argv[i + 1];
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--notes=")) {
+      notesFile = arg.slice("--notes=".length);
+      continue;
+    }
+
+    if (!arg.startsWith("-")) {
+      type = arg.toLowerCase();
+      continue;
+    }
+
+    console.error("  Неизвестный аргумент: " + arg);
+    process.exit(1);
+  }
+
+  if (!["patch", "minor", "major"].includes(type)) {
+    console.error("  Аргумент должен быть: patch | minor | major");
+    process.exit(1);
+  }
+
+  if (notesFile === "") {
+    console.error("  После --notes укажи путь к Markdown-файлу с описанием релиза.");
+    process.exit(1);
+  }
+
+  return { type, notesFile };
+}
+
+function readReleaseBody(notesFile, tag) {
+  if (!notesFile) {
+    return "Обновление " + tag + "\n\n```powershell\nbun run make\n```";
+  }
+
+  const notesPath = path.resolve(path.join(__dirname, ".."), notesFile);
+  if (!fs.existsSync(notesPath)) {
+    console.error("  Файл с описанием релиза не найден: " + notesPath);
+    process.exit(1);
+  }
+
+  const body = fs.readFileSync(notesPath, "utf8").trim();
+  if (!body) {
+    console.error("  Файл с описанием релиза пуст: " + notesPath);
+    process.exit(1);
+  }
+
+  return body;
+}
+
 function bumpVersion(current, type) {
   const parts = current.split(".").map(Number);
   if (type === "major") { parts[0] += 1; parts[1] = 0; parts[2] = 0; }
@@ -69,11 +133,7 @@ function sleep(ms) {
 
 async function main() {
   const token = loadDotenv();
-  const type = (process.argv[2] || "patch").toLowerCase();
-  if (!["patch", "minor", "major"].includes(type)) {
-    console.error("  Аргумент должен быть: patch | minor | major");
-    process.exit(1);
-  }
+  const { type, notesFile } = parseArgs(process.argv.slice(2));
 
   // 1. Версия
   const pkgPath = path.join(__dirname, "..", "package.json");
@@ -81,10 +141,14 @@ async function main() {
   const currentVersion = pkg.version;
   const newVersion = bumpVersion(currentVersion, type);
   const tag = "v" + newVersion;
+  const releaseBody = readReleaseBody(notesFile, tag);
 
   console.log("\n  Текущая версия: " + currentVersion);
   console.log("  Новая версия:   " + newVersion);
   console.log("  Тэг:            " + tag + "\n");
+  if (notesFile) {
+    console.log("  Описание релиза: " + notesFile + "\n");
+  }
 
   // 2. Обновить package.json
   pkg.version = newVersion;
@@ -128,7 +192,7 @@ async function main() {
     body: JSON.stringify({
       tag_name: tag,
       name: tag,
-      body: "Обновление " + tag + "\n\n```powershell\nbun run make\n```",
+      body: releaseBody,
       draft: false,
       prerelease: false,
     }),
