@@ -29,6 +29,9 @@ button, input, select { font:inherit; } button { color:inherit; cursor:pointer; 
 .mode-button.needs-key { border-color:color-mix(in srgb,var(--accent) 55%,var(--line)); color:var(--accent); }
 .folder-action { display:grid; place-items:center; width:36px; height:36px; padding:0; }.folder-action .ui-icon { width:17px; height:17px; }.playlist-input .folder-action { width:38px; height:38px; }
 .playlist-import-button { flex:none; white-space:nowrap; }
+.player-head { display:grid; grid-template-columns:1fr minmax(260px, 760px) 1fr; }
+.player-link-form { grid-column:2; width:100%; justify-self:center; flex:none; }
+.layout-actions { grid-column:3; justify-self:end; margin-left:0; }
 .player-head .subtle-button,.player-head .primary,.player-head .mode-button { display:grid; place-items:center; width:33px; height:31px; padding:0; }
 .player-head .primary { color:#073b2c; }
 .player-head .subtle-button .ui-icon,.player-head .primary .ui-icon,.player-head .mode-button .ui-icon { width:16px; height:16px; }
