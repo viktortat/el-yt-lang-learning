@@ -51,3 +51,30 @@ bun run package
 ```
 
 Убедитесь, что `out/yt-lang-learning-win32-x64/resources/app.asar` содержит все нужные файлы.
+
+## Автоматический релиз (скрипт)
+
+```powershell
+bun run release          # +0.0.1 (patch)
+bun run release patch    # +0.0.1
+bun run release minor    # +0.1.0
+bun run release major    # +1.0.0
+```
+
+Скрипт:
+1. читает `GITHUB_TOKEN` из файла `.env` (создай по образцу `.env.example`)
+2. увеличивает версию в `package.json`
+3. прогоняет тесты (`bun run test`)
+4. собирает установщик (`bun run make`)
+5. создаёт релиз на GitHub с тэгом `v{новая_версия}`
+6. загружает `yt-lang-learning-setup.exe` в ассеты
+7. коммитит `package.json`, создаёт тэг и пушит в `origin`
+
+Перед запуском создай `.env` в корне проекта:
+
+```ini
+GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+```
+
+Токен создать [здесь](https://github.com/settings/tokens/new) с правами `repo`.
+
