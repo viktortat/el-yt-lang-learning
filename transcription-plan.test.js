@@ -23,18 +23,19 @@ test("streams every new faster-whisper percentage even when output is split", ()
   assert.deepEqual(parse("40%\rневажная-кодировка:  27.8%"), [12, 28]);
 });
 
-test("uses the configured local transcriber with English language", () => {
+test("uses the configured local transcriber with a selected or automatically detected language", () => {
   const config = { pythonPath: "C:\\Python314\\python.exe", scriptPath: "C:\\skill\\transcribe.py", modelRoot: "C:\\models", model: "large-v3-turbo" };
-  const args = transcriberArgs(config, "C:\\tmp\\source.mp4", "C:\\tmp\\results");
+  const args = transcriberArgs(config, "C:\\tmp\\source.mp4", "C:\\tmp\\results", "de");
   assert.deepEqual(args.slice(0, 4), ["run", "--python", config.pythonPath, config.scriptPath]);
-  assert.deepEqual(args.slice(-2), ["--language", "en"]);
+  assert.deepEqual(args.slice(-2), ["--language", "de"]);
+  assert.equal(transcriberArgs(config, "source.mp4", "results").includes("--language"), false);
 });
 
 test("converts faster-whisper JSON segments into application captions", () => {
   assert.deepEqual(captionsFromTranscript({ segments: [
     { id: 7, start: 1.25, end: 3.5, text: " Hello " },
     { start: "bad", end: 4, text: "ignored" },
-  ] }), [{ id: "en-1", start: 1.25, end: 3.5, text: "Hello" }]);
+  ] }, "ro"), [{ id: "ro-1", start: 1.25, end: 3.5, text: "Hello" }]);
 });
 
 test("a successful yt-dlp exit without a VTT still requires automatic-caption fallback", () => {

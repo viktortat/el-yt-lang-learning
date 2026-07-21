@@ -72,12 +72,12 @@ test("late caption responses are rejected after the active video changes", () =>
 
 test("caption downloads are deduplicated and local transcription requires consent", () => {
   assert.match(appSource, /captionDownloads\.has\(jobKey\)/);
-  assert.match(appSource, /confirm\("YouTube не отдал английскую дорожку\.[^\n]+faster-whisper\?"\)/);
-  assert.match(appSource, /transcribeEnglishCaptions/);
+  assert.match(appSource, /showChoiceDialog\(\{ title: "Не удалось получить субтитры"/);
+  assert.match(appSource, /transcribeCaptionTrack/);
 });
 
 test("translation reports progress and is deduplicated per video within a library", () => {
-  assert.match(mainSource, /oncePerCaptionJob\(`translate:\$\{libraryId\}:\$\{videoId\}`/);
+  assert.match(mainSource, /oncePerCaptionJob\(`translate:\$\{payload\.libraryId\}:\$\{payload\.videoId\}:\$\{payload\.targetLanguage\}`/);
   assert.match(mainSource, /captions:translation-progress/);
   assert.match(mainSource, /response_format: \{ type: "json_schema"/);
   assert.match(preloadSource, /onTranslationProgress/);

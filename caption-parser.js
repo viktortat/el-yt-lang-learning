@@ -30,9 +30,9 @@
     return signals / (segments.length - 1) >= 0.2;
   }
 
-  function normalizeCaptionSegments(input) {
+  function normalizeCaptionSegments(input, idPrefix = "en") {
     const segments = (input || []).map(segment => ({ ...segment, text: clean(segment.text) })).filter(segment => segment.text);
-    if (!looksRolling(segments)) return segments.map((segment, index) => ({ ...segment, id: `en-${index + 1}` }));
+    if (!looksRolling(segments)) return segments.map((segment, index) => ({ ...segment, id: `${idPrefix}-${index + 1}` }));
 
     const filtered = segments.filter((segment, index) => {
       const next = segments[index + 1];
@@ -43,7 +43,7 @@
     let previousText = "";
     const flush = () => {
       if (!buffer?.text) return;
-      result.push({ id: `en-${result.length + 1}`, start: buffer.start, end: buffer.end, text: clean(buffer.text) });
+      result.push({ id: `${idPrefix}-${result.length + 1}`, start: buffer.start, end: buffer.end, text: clean(buffer.text) });
       buffer = null;
     };
 

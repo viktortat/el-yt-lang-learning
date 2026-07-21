@@ -1,16 +1,34 @@
 {
-  "version": 1,
+  "version": 2,
   "theme": "dark",
+  "languages": {
+    "enabled": [
+      "en",
+      "de",
+      "pl",
+      "ro",
+      "ru",
+      "uk"
+    ],
+    "studyLanguage": "en",
+    "translationLanguage": "ru",
+    "detectionThreshold": 0.8
+  },
   "translation": {
     "provider": "openrouter",
     "model": "google/gemini-2.5-flash-lite",
     "encryptedApiKey": "djEwcC5ahDKyJ/LWMnw4VRS0kUfLumTJg8janKuMvxdaezEo51WpENdcNzifrt7jewmVkZOvvyCjPtQFoxg/UC9RhG3DWAffaN/ugaDyE0SY9cb6oII1YMuMi8LcFKtoVAx1+3LJhIo=",
-    "hasApiKey": false
+    "hasApiKey": true
   },
   "transcription": {
     "modelRoot": "C:\\Users\\viktor\\.cache\\ai-models\\faster-whisper",
     "model": "large-v3-turbo",
     "uvPath": "uv",
-    "ytDlpPath": "yt-dlp"
+    "ytDlpPath": "yt-dlp",
+    "pythonPath": "C:\\Python314\\python.exe",
+    "scriptPath": "C:\\Users\\viktor\\.codex\\skills\\transcribe-local-video\\scripts\\transcribe.py"
+  },
+  "onboarding": {
+    "defaultLibraryOfferEnabled": true
   }
 }

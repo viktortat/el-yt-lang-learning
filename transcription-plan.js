@@ -14,21 +14,23 @@
     ];
   }
 
-  function transcriberArgs(config, inputPath, outputDirectory) {
-    return [
+  function transcriberArgs(config, inputPath, outputDirectory, language = "") {
+    const args = [
       "run", "--python", config.pythonPath,
       config.scriptPath,
       inputPath,
       "--output-dir", outputDirectory,
       "--model-root", config.modelRoot,
       "--model", config.model,
-      "--language", "en",
     ];
+    if (language) args.push("--language", language);
+    return args;
   }
 
-  function captionsFromTranscript(payload) {
+  function captionsFromTranscript(payload, language = "") {
+    const prefix = String(language || payload?.language || payload?.info?.language || payload?.metadata?.language || "seg").toLowerCase();
     return (payload?.segments || []).map((segment, index) => ({
-      id: `en-${index + 1}`,
+      id: `${prefix}-${index + 1}`,
       start: Number(segment.start),
       end: Number(segment.end),
       text: String(segment.text || "").trim(),

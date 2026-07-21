@@ -1,5 +1,10 @@
 {
-  "version": 1,
+  "version": 2,
+  "preferences": {
+    "studyLanguage": "ro",
+    "translationLanguage": "ru",
+    "translationInstruction": ""
+  },
   "root": {
     "id": "root",
     "type": "folder",

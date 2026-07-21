@@ -5,9 +5,14 @@ const os = require("os");
 const { spawn } = require("child_process");
 const { mkdirSync } = require("fs");
 const { appendFile, copyFile, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } = require("fs/promises");
-const { downloadVideoArgs, transcriberArgs, captionsFromTranscript, hasVtt, chooseEnglishVtt, createProgressParser } = require("./transcription-plan");
+const { downloadVideoArgs, transcriberArgs, captionsFromTranscript, hasVtt, createProgressParser } = require("./transcription-plan");
 const { normalizeCaptionSegments } = require("./caption-parser");
 const { translationsFromModel } = require("./translation-response");
+const {
+  normalizeLanguage, baseLanguage, sameLanguage, normalizeLanguageSettings,
+  normalizeLibraryPreferences, emptyCaptionDocument, normalizeCaptionDocument,
+  makeTrack, addTrack, preferredTrack
+} = require("./language-model");
 
 const APP_NAME = "YT Lang Learning";
 const APP_VERSION = app.getVersion();
@@ -58,8 +63,10 @@ function newId(prefix) {
 }
 
 function defaultLibrary() {
+  const preferences = normalizeLibraryPreferences(null, settings?.languages || normalizeLanguageSettings());
   return {
-    version: 1,
+    version: 2,
+    preferences,
     root: { id: "root", type: "folder", name: "Моя библиотека", children: [] }
   };
 }
@@ -80,8 +87,9 @@ function normalizeLibraries(value) {
 
 function defaultSettings() {
   return {
-    version: 1,
+    version: 2,
     theme: "dark",
+    languages: normalizeLanguageSettings(),
     translation: {
       provider: "openrouter",
       model: "google/gemini-2.5-flash-lite",
@@ -103,7 +111,7 @@ function defaultSettings() {
 
 function normalizeLibrary(value) {
   if (!value || !value.root || value.root.type !== "folder") return defaultLibrary();
-  return { version: 1, root: value.root };
+  return { version: 2, preferences: normalizeLibraryPreferences(value.preferences, settings?.languages || normalizeLanguageSettings()), root: value.root };
 }
 
 function normalizeYoutubePlaylistUrl(value) {
@@ -130,6 +138,8 @@ function normalizeSettings(value) {
   return {
     ...defaults,
     ...value,
+    version: 2,
+    languages: normalizeLanguageSettings(value?.languages),
     translation: { ...defaults.translation, ...(value && value.translation) },
     transcription: { ...defaults.transcription, ...(value && value.transcription) },
     onboarding: {
@@ -227,24 +237,24 @@ async function loadData() {
   await migrateLegacyLibrary();
   libraries = normalizeLibraries(await readJson(librariesPath(), defaultLibraries));
   await writeJson(librariesPath(), libraries);
-  library = normalizeLibrary(await readJson(libraryPath(), defaultLibrary));
   settings = normalizeSettings(await readJson(settingsPath(), defaultSettings));
+  library = normalizeLibrary(await readJson(libraryPath(), defaultLibrary));
 }
 
-function defaultCaptions() { return { version: 1, english: [], russian: [], studiedIds: [], translatedAutoCaptions: null }; }
-async function loadCaptions(videoId, libraryId = libraries.activeId) {
-  const captions = await readJson(captionsPath(videoId, libraryId), defaultCaptions);
-  if (captions.translatedAutoCaptions !== null && typeof captions.translatedAutoCaptions !== "object") captions.translatedAutoCaptions = null;
-  if (captions.english?.length && !captions.russian?.length) {
-    const normalized = normalizeCaptionSegments(captions.english);
-    if (normalized.length !== captions.english.length) {
-      captions.english = normalized;
-      await writeJson(captionsPath(videoId, libraryId), captions);
-    }
-  }
-  return captions;
+function libraryPreferences(libraryId = libraries.activeId) {
+  if (libraryId === libraries.activeId) return library?.preferences || normalizeLibraryPreferences(null, settings.languages);
+  return normalizeLibraryPreferences(null, settings.languages);
 }
-async function saveCaptions(videoId, captions, libraryId = libraries.activeId) { await writeJson(captionsPath(videoId, libraryId), captions); return captions; }
+function defaultCaptions(libraryId = libraries?.activeId) { return emptyCaptionDocument(libraryPreferences(libraryId)); }
+async function loadCaptions(videoId, libraryId = libraries.activeId) {
+  const captions = await readJson(captionsPath(videoId, libraryId), () => defaultCaptions(libraryId));
+  return normalizeCaptionDocument(captions, libraryPreferences(libraryId));
+}
+async function saveCaptions(videoId, captions, libraryId = libraries.activeId) {
+  const normalized = normalizeCaptionDocument(captions, libraryPreferences(libraryId));
+  await writeJson(captionsPath(videoId, libraryId), normalized);
+  return normalized;
+}
 
 function videoIds(sourceLibrary) {
   const ids = new Set();
@@ -265,18 +275,18 @@ function validateLibraryTree(node) {
 async function libraryBundle(sourceLibrary = library, libraryId = libraries.activeId) {
   const captions = {};
   for (const videoId of videoIds(sourceLibrary)) captions[videoId] = await loadCaptions(videoId, libraryId);
-  return { format: "yt-lang-learning-library", version: 1, library: sourceLibrary, captions };
+  return { format: "yt-lang-learning-library", version: 2, library: sourceLibrary, captions };
 }
 
 function normalizeLibraryBundle(value) {
-  if (!value || value.format !== "yt-lang-learning-library" || value.version !== 1 || !validateLibraryTree(value.library?.root)) {
+  if (!value || value.format !== "yt-lang-learning-library" || ![1, 2].includes(value.version) || !validateLibraryTree(value.library?.root)) {
     throw new Error("Выберите корректный файл экспорта библиотеки YT Lang Learning");
   }
   const nextLibrary = normalizeLibrary(value.library);
   const captions = {};
   for (const videoId of videoIds(nextLibrary)) {
     const item = value.captions?.[videoId] || defaultCaptions();
-    captions[videoId] = { version: 1, english: Array.isArray(item.english) ? item.english : [], russian: Array.isArray(item.russian) ? item.russian : [], studiedIds: Array.isArray(item.studiedIds) ? item.studiedIds : [], translatedAutoCaptions: item.translatedAutoCaptions && typeof item.translatedAutoCaptions === "object" ? item.translatedAutoCaptions : null };
+    captions[videoId] = normalizeCaptionDocument(item, nextLibrary.preferences);
   }
   return { library: nextLibrary, captions };
 }
@@ -354,26 +364,32 @@ async function runYtDlpCapture(args, cwd) {
   }
 }
 
-function isEnglishLanguage(language) {
-  return /^en(?:[-_]|$)/i.test(String(language || ""));
-}
-
-async function englishCaptionTrackInfo({ url }) {
+async function captionTrackInfo({ url, targetLanguage }) {
   const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "ytll-caption-info-"));
+  const target = normalizeLanguage(targetLanguage, library?.preferences?.studyLanguage || settings.languages.studyLanguage);
   try {
-    const output = await runYtDlpCapture([
-      "--skip-download", "--dump-single-json", "--no-warnings", "--ignore-no-formats-error", url
-    ], temporaryDirectory);
+    let output;
+    try {
+      output = await runYtDlpCapture([
+        "--skip-download", "--dump-single-json", "--no-warnings", "--ignore-no-formats-error", url
+      ], temporaryDirectory);
+    } catch (error) {
+      if (/HTTP Error 429/i.test(error.message)) return { status: "rate-limited", sourceLanguage: null, targetLanguage: target, manualTracks: [], hasManualTrack: false, hasAutomaticTrack: false, needsTranslatedAutomaticTrack: false };
+      throw error;
+    }
     const metadata = JSON.parse(output);
     const manualTracks = Object.keys(metadata.subtitles || {});
     const automaticTracks = Object.keys(metadata.automatic_captions || {});
-    const sourceLanguage = String(metadata.language || "").trim().toLowerCase();
-    const hasEnglishManualTrack = manualTracks.some(isEnglishLanguage);
+    const sourceLanguage = normalizeLanguage(metadata.language) || null;
+    const hasManualTrack = manualTracks.some(language => sameLanguage(language, target));
+    const hasAutomaticTrack = automaticTracks.some(language => sameLanguage(language, target));
     return {
-      hasEnglishManualTrack,
-      hasAutomaticTrack: automaticTracks.length > 0,
-      sourceLanguage: sourceLanguage || null,
-      needsTranslatedAutomaticTrack: !hasEnglishManualTrack && automaticTracks.length > 0 && !!sourceLanguage && !isEnglishLanguage(sourceLanguage)
+      sourceLanguage,
+      targetLanguage: target,
+      manualTracks,
+      hasManualTrack,
+      hasAutomaticTrack,
+      needsTranslatedAutomaticTrack: !hasManualTrack && hasAutomaticTrack && !!sourceLanguage && !sameLanguage(sourceLanguage, target)
     };
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
@@ -408,7 +424,7 @@ function seconds(value) {
   return Number(hours) * 3600 + Number(minutes) * 60 + Number(rest);
 }
 
-function parseVtt(content) {
+function parseVtt(content, language = "und") {
   const lines = content.replace(/^\uFEFF/, "").replace(/\r/g, "").split("\n");
   const segments = [];
   for (let index = 0; index < lines.length; index += 1) {
@@ -418,31 +434,47 @@ function parseVtt(content) {
     while (++index < lines.length && lines[index].trim()) text.push(lines[index]);
     const value = text.join(" ").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
     if (value && !segments.some(segment => segment.text === value && Math.abs(segment.start - seconds(match[1])) < .1)) {
-      segments.push({ id: `en-${segments.length + 1}`, start: seconds(match[1]), end: seconds(match[2]), text: value });
+      segments.push({ id: `${baseLanguage(language) || "seg"}-${segments.length + 1}`, start: seconds(match[1]), end: seconds(match[2]), text: value });
     }
   }
-  return normalizeCaptionSegments(segments);
+  return normalizeCaptionSegments(segments, baseLanguage(language) || "seg");
 }
 
-async function downloadEnglishCaptions({ videoId, url, libraryId = libraries.activeId, allowTranslatedAutomaticTrack = true }) {
+function chooseLanguageVtt(files, language) {
+  const base = baseLanguage(language);
+  return files.find(file => file.endsWith(`.${language}-orig.vtt`))
+    || files.find(file => file.endsWith(`.${language}.vtt`))
+    || files.find(file => file.endsWith(`.${base}-orig.vtt`))
+    || files.find(file => file.endsWith(`.${base}.vtt`))
+    || files.find(file => file.endsWith(".vtt"));
+}
+
+function nextTrackRevision(captions, language, source) {
+  return Object.values(captions.tracks).filter(track => sameLanguage(track.language, language) && track.source === source).reduce((maximum, track) => Math.max(maximum, track.revision), 0) + 1;
+}
+
+async function downloadCaptionTrack({ videoId, url, language, libraryId = libraries.activeId, allowTranslatedAutomaticTrack = true }) {
+  const targetLanguage = normalizeLanguage(language, libraryPreferences(libraryId).studyLanguage);
   const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "ytll-captions-"));
   try {
     const output = path.join(temporaryDirectory, "caption.%(ext)s");
+    let source = "youtube-manual";
     try {
       // Авторские дорожки надёжнее и реже получают rate limit от YouTube.
       await runYtDlp([
-        "--skip-download", "--write-subs", "--sub-langs", "en,en-GB,en-US,en-CA,en-AU", "--sub-format", "vtt", "--convert-subs", "vtt",
+        "--skip-download", "--write-subs", "--sub-langs", `${targetLanguage},${targetLanguage}.*`, "--sub-format", "vtt", "--convert-subs", "vtt",
         "-o", output, url
       ], temporaryDirectory);
     } catch {}
     let files = await readdir(temporaryDirectory);
     if (!hasVtt(files)) {
       if (!allowTranslatedAutomaticTrack) return { status: "translated-auto-track-not-approved" };
+      source = "youtube-auto";
       // yt-dlp возвращает код 0 даже когда ручной дорожки нет, поэтому
       // fallback определяется по фактически созданному VTT-файлу.
       try {
         await runYtDlp([
-          "--skip-download", "--write-auto-subs", "--sub-langs", "en-orig,en", "--sub-format", "vtt", "--convert-subs", "vtt",
+          "--skip-download", "--write-auto-subs", "--sub-langs", `${targetLanguage}-orig,${targetLanguage}`, "--sub-format", "vtt", "--convert-subs", "vtt",
           "-o", output, url
         ], temporaryDirectory);
       } catch (error) {
@@ -451,39 +483,61 @@ async function downloadEnglishCaptions({ videoId, url, libraryId = libraries.act
       }
       files = await readdir(temporaryDirectory);
     }
-    const vtt = chooseEnglishVtt(files);
+    const vtt = chooseLanguageVtt(files, targetLanguage);
     if (!vtt) return { status: "missing-track" };
-    const english = parseVtt(await readFile(path.join(temporaryDirectory, vtt), "utf8"));
-    if (!english.length) throw new Error("В найденной дорожке нет реплик.");
+    const segments = parseVtt(await readFile(path.join(temporaryDirectory, vtt), "utf8"), targetLanguage);
+    if (!segments.length) throw new Error("В найденной дорожке нет реплик.");
     const captions = await loadCaptions(videoId, libraryId);
-    captions.english = english;
-    captions.russian = [];
-    captions.studiedIds ||= [];
+    const info = await captionTrackInfo({ url, targetLanguage }).catch(() => ({ sourceLanguage: null }));
+    captions.speechLanguage = info.sourceLanguage || captions.speechLanguage || targetLanguage;
+    const translated = captions.speechLanguage && !sameLanguage(captions.speechLanguage, targetLanguage);
+    if (translated) source = "youtube-translation";
+    const sourceTrack = translated ? preferredTrack(captions, captions.speechLanguage) : null;
+    addTrack(captions, makeTrack({
+      language: targetLanguage,
+      source,
+      kind: translated ? "translation" : "source",
+      sourceTrackId: sourceTrack?.id || null,
+      revision: nextTrackRevision(captions, targetLanguage, source),
+      segments
+    }));
+    captions.active.studyLanguage ||= targetLanguage;
     return { status: "ok", captions: await saveCaptions(videoId, captions, libraryId) };
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
 }
 
-async function transcribeEnglishCaptions({ videoId, url, libraryId = libraries.activeId }, onProgress = () => {}) {
+async function transcribeCaptionTrack({ videoId, url, mediaPath, language = "", libraryId = libraries.activeId }, onProgress = () => {}) {
   const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "ytll-whisper-"));
   try {
-    const sourceTemplate = path.join(temporaryDirectory, "source.%(ext)s");
-    const parseDownloadProgress = createProgressParser("download");
-    await runYtDlp(downloadVideoArgs(sourceTemplate, url), temporaryDirectory, output => {
-      for (const percent of parseDownloadProgress(output)) onProgress({ videoId, stage: "download", percent });
-    });
-    const downloadedFiles = await readdir(temporaryDirectory);
-    const sourceFile = downloadedFiles.find(file => /\.(mp4|mkv|webm|mov|m4v)$/i.test(file));
-    if (!sourceFile) throw new Error("Не удалось скачать временное видео для локального распознавания.");
-
-    const inputPath = path.join(temporaryDirectory, sourceFile);
+    let inputPath = mediaPath;
+    if (!inputPath) {
+      const sourceTemplate = path.join(temporaryDirectory, "source.%(ext)s");
+      const parseDownloadProgress = createProgressParser("download");
+      await runYtDlp(downloadVideoArgs(sourceTemplate, url), temporaryDirectory, output => {
+        for (const percent of parseDownloadProgress(output)) onProgress({ videoId, stage: "download", percent });
+      });
+      const downloadedFiles = await readdir(temporaryDirectory);
+      const sourceFile = downloadedFiles.find(file => /\.(mp4|mkv|webm|mov|m4v)$/i.test(file));
+      if (!sourceFile) throw new Error("Не удалось скачать временное видео для локального распознавания.");
+      inputPath = path.join(temporaryDirectory, sourceFile);
+    }
+    if (/\.(mp3|m4a|wav|flac|ogg)$/i.test(inputPath)) {
+      const videoContainer = path.join(temporaryDirectory, "local-audio.mp4");
+      await run("ffmpeg", [
+        "-y", "-f", "lavfi", "-i", "color=c=black:s=320x240:r=1",
+        "-i", inputPath, "-shortest", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", videoContainer
+      ], temporaryDirectory);
+      inputPath = videoContainer;
+    }
+    const sourceFile = path.basename(inputPath);
     const outputDirectory = path.join(temporaryDirectory, "results");
     const parseTranscriptionProgress = createProgressParser("transcription");
     onProgress({ videoId, stage: "transcription-start", percent: 0 });
     await run(
       settings.transcription.uvPath,
-      transcriberArgs(settings.transcription, inputPath, outputDirectory),
+      transcriberArgs(settings.transcription, inputPath, outputDirectory, normalizeLanguage(language)),
       temporaryDirectory,
       output => {
         for (const percent of parseTranscriptionProgress(output)) onProgress({ videoId, stage: "transcription", percent });
@@ -493,12 +547,13 @@ async function transcribeEnglishCaptions({ videoId, url, libraryId = libraries.a
     const transcriptDirectory = path.join(outputDirectory, `${path.parse(sourceFile).name}_transcript`);
     const transcriptPath = path.join(transcriptDirectory, `${path.parse(sourceFile).name}.json`);
     const payload = JSON.parse(await readFile(transcriptPath, "utf8"));
-    const english = captionsFromTranscript(payload);
-    if (!english.length) throw new Error("faster-whisper не распознал английскую речь в видео.");
+    const detectedLanguage = normalizeLanguage(payload?.language || payload?.info?.language || payload?.metadata?.language || language) || normalizeLanguage(language) || "und";
+    const segments = captionsFromTranscript(payload, detectedLanguage);
+    if (!segments.length) throw new Error("faster-whisper не распознал речь в видео.");
     const captions = await loadCaptions(videoId, libraryId);
-    captions.english = english;
-    captions.russian = [];
-    captions.studiedIds ||= [];
+    captions.speechLanguage = detectedLanguage;
+    const source = "whisper";
+    addTrack(captions, makeTrack({ language: detectedLanguage, source, revision: nextTrackRevision(captions, detectedLanguage, source), confidence: payload?.language_probability ?? payload?.info?.language_probability ?? null, segments }));
     return saveCaptions(videoId, captions, libraryId);
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
@@ -512,15 +567,17 @@ function oncePerCaptionJob(key, factory) {
   return job;
 }
 
-async function translateCaptions(videoId, libraryId = libraries.activeId, onProgress = () => {}) {
+async function translateCaptionTrack({ videoId, sourceLanguage, targetLanguage, libraryId = libraries.activeId }, onProgress = () => {}) {
   if (!settings.translation.encryptedApiKey) throw new Error("В настройках не указан ключ OpenRouter.");
   const apiKey = safeStorage.decryptString(Buffer.from(settings.translation.encryptedApiKey, "base64"));
   const captions = await loadCaptions(videoId, libraryId);
-  if (!captions.english.length) throw new Error("Сначала загрузите английские субтитры.");
-  captions.english = normalizeCaptionSegments(captions.english);
-  const russian = [];
-  for (let offset = 0; offset < captions.english.length; offset += 25) {
-    const batch = captions.english.slice(offset, offset + 25);
+  const sourceTrack = preferredTrack(captions, sourceLanguage || captions.active.studyLanguage || captions.speechLanguage);
+  const target = normalizeLanguage(targetLanguage, captions.active.translationLanguage);
+  if (!sourceTrack?.segments.length) throw new Error("Сначала получите исходную дорожку.");
+  const translatedSegments = [];
+  const instruction = libraryPreferences(libraryId).translationInstruction;
+  for (let offset = 0; offset < sourceTrack.segments.length; offset += 25) {
+    const batch = sourceTrack.segments.slice(offset, offset + 25);
     const translatedById = new Map();
     let missing = batch;
     for (let attempt = 0; attempt < 3 && missing.length; attempt += 1) {
@@ -539,7 +596,7 @@ async function translateCaptions(videoId, libraryId = libraries.activeId, onProg
             }
           } } },
           messages: [
-            { role: "system", content: "Переводи английские субтитры на естественный русский. Верни JSON-объект с полем translations — массивом объектов {id,text}; верни перевод для каждой переданной реплики и сохрани все id." },
+            { role: "system", content: `Переводи субтитры с языка ${sourceTrack.language} на ${target}. Перевод должен быть естественным, без пояснений. Верни JSON-объект с полем translations — массивом объектов {id,text}; верни перевод для каждой переданной реплики и сохрани все id.${instruction ? ` Дополнительная инструкция: ${instruction}` : ""}` },
             { role: "user", content: JSON.stringify(requested.map(item => ({ id: item.id, text: item.text }))) }
           ]
         })
@@ -563,13 +620,14 @@ async function translateCaptions(videoId, libraryId = libraries.activeId, onProg
     }
     if (missing.length) throw new Error(`OpenRouter не перевёл реплики: ${missing.map(item => item.id).join(", ")}.`);
     for (const item of batch) {
-      russian.push({ ...item, text: translatedById.get(item.id) });
+      translatedSegments.push({ ...item, text: translatedById.get(item.id) });
     }
-    captions.russian = [...russian];
-    await saveCaptions(videoId, captions, libraryId);
-    onProgress({ videoId, completed: russian.length, total: captions.english.length });
+    onProgress({ videoId, completed: translatedSegments.length, total: sourceTrack.segments.length });
   }
-  return captions;
+  const source = "openrouter";
+  addTrack(captions, makeTrack({ language: target, source, kind: "translation", sourceTrackId: sourceTrack.id, revision: nextTrackRevision(captions, target, source), segments: translatedSegments }));
+  captions.active.translationLanguage = target;
+  return saveCaptions(videoId, captions, libraryId);
 }
 
 function publicSettings() {
@@ -795,20 +853,18 @@ if (require("electron-squirrel-startup")) {
       return { library: await replaceLibraryFromBundle(backup) };
     });
     ipcMain.handle("captions:get", (_event, videoId, libraryId) => loadCaptions(videoId, libraryId));
-    ipcMain.handle("captions:save", (_event, videoId, captions, libraryId) => saveCaptions(videoId, {
-      version: 1,
-      english: Array.isArray(captions?.english) ? captions.english : [],
-      russian: Array.isArray(captions?.russian) ? captions.russian : [],
-      studiedIds: Array.isArray(captions?.studiedIds) ? captions.studiedIds : [],
-      translatedAutoCaptions: captions?.translatedAutoCaptions && typeof captions.translatedAutoCaptions === "object" ? captions.translatedAutoCaptions : null,
-    }, libraryId));
-    ipcMain.handle("captions:english-track-info", (_event, payload) => englishCaptionTrackInfo(payload));
-    ipcMain.handle("captions:download-english", (_event, payload) => oncePerCaptionJob(`youtube:${payload.libraryId}:${payload.videoId}`, () => downloadEnglishCaptions(payload)));
-    ipcMain.handle("captions:transcribe-english", (event, payload) => oncePerCaptionJob(
+    ipcMain.handle("captions:save", (_event, videoId, captions, libraryId) => saveCaptions(videoId, captions, libraryId));
+    ipcMain.handle("captions:track-info", (_event, payload) => captionTrackInfo(payload));
+    ipcMain.handle("captions:download-track", (_event, payload) => oncePerCaptionJob(`youtube:${payload.libraryId}:${payload.videoId}:${payload.language}`, () => downloadCaptionTrack(payload)));
+    ipcMain.handle("captions:select-local-media", async () => {
+      const result = await dialog.showOpenDialog(mainWindow, { title: "Выберите видео или аудио", properties: ["openFile"], filters: [{ name: "Медиа", extensions: ["mp4", "mkv", "webm", "mov", "m4v", "mp3", "m4a", "wav", "flac", "ogg"] }] });
+      return result.canceled ? null : result.filePaths[0];
+    });
+    ipcMain.handle("captions:transcribe-track", (event, payload) => oncePerCaptionJob(
       `whisper:${payload.libraryId}:${payload.videoId}`,
-      () => transcribeEnglishCaptions(payload, progress => event.sender.send("captions:transcription-progress", progress))
+      () => transcribeCaptionTrack(payload, progress => event.sender.send("captions:transcription-progress", progress))
     ));
-    ipcMain.handle("captions:translate", (event, videoId, libraryId) => oncePerCaptionJob(`translate:${libraryId}:${videoId}`, () => translateCaptions(videoId, libraryId, progress => event.sender.send("captions:translation-progress", progress))));
+    ipcMain.handle("captions:translate-track", (event, payload) => oncePerCaptionJob(`translate:${payload.libraryId}:${payload.videoId}:${payload.targetLanguage}`, () => translateCaptionTrack(payload, progress => event.sender.send("captions:translation-progress", progress))));
     ipcMain.handle("settings:get", () => publicSettings());
     ipcMain.handle("settings:save", async (_event, payload) => {
       settings = storeSettings(payload.settings, payload.apiKey);

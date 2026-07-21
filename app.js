@@ -1,7 +1,7 @@
 (() => {
   const app = document.querySelector("#app");
   const toast = document.querySelector("#toast");
-  const state = { library: null, libraries: null, settings: null, activeTab: "library", settingsSection: "appearance", selectedId: "root", playerVideoId: null, playerUrl: "", previewTitle: "", captions: { english: [], russian: [], studiedIds: [] }, player: null, youTubeReady: false, expanded: new Set(["root"]), layout: JSON.parse(localStorage.getItem("ytll-layout") || '{"mode":"columns","english":true,"russian":true}') };
+  const state = { library: null, libraries: null, settings: null, activeTab: "library", settingsSection: "appearance", selectedId: "root", playerVideoId: null, playerUrl: "", previewTitle: "", captions: window.LanguageModel.emptyCaptionDocument(), player: null, youTubeReady: false, expanded: new Set(["root"]), layout: JSON.parse(localStorage.getItem("ytll-layout") || '{"mode":"columns","english":true,"russian":true}') };
   state.layout.leftWidth = Number(state.layout.leftWidth) || 320;
   state.layout.rightWidth = Number(state.layout.rightWidth) || 320;
   if (state.layout.mode === "columns" && !state.layout.english && !state.layout.russian) {
@@ -9,7 +9,7 @@
     state.layout.russian = true;
     localStorage.setItem("ytll-layout", JSON.stringify(state.layout));
   }
-  state.follow = { en: true, ru: true };
+  state.follow = { left: true, right: true };
   state.activeCaptionId = "";
   state.playerGeneration = 0;
   state.captionGeneration = 0;
@@ -28,11 +28,72 @@
 
   const escapeHtml = value => String(value || "").replace(/[&<>"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[char]);
   const clone = value => JSON.parse(JSON.stringify(value));
-  const emptyCaptions = () => ({ english: [], russian: [], studiedIds: [] });
+  const emptyCaptions = () => window.LanguageModel.emptyCaptionDocument(state.library?.preferences || state.settings?.languages);
   const newId = prefix => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   const showToast = message => { toast.textContent = message; toast.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove("show"), 2600); };
+  function showChoiceDialog({ title, message, actions }) {
+    return new Promise(resolve => {
+      const backdrop = document.createElement("div");
+      backdrop.className = "dialog-backdrop";
+      backdrop.innerHTML = `<section class="dialog-card choice-dialog" role="dialog" aria-modal="true" aria-labelledby="choiceTitle"><h2 id="choiceTitle">${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p><div class="form-actions">${actions.map((action, index) => `<button type="button" class="${action.primary ? "primary" : "subtle-button"}" data-choice="${index}">${escapeHtml(action.label)}</button>`).join("")}</div></section>`;
+      const onKeydown = event => { if (event.key === "Escape") finish(null); };
+      const finish = value => { document.removeEventListener("keydown", onKeydown); backdrop.remove(); resolve(value); };
+      backdrop.addEventListener("click", event => { if (event.target === backdrop) finish(null); });
+      backdrop.querySelectorAll("[data-choice]").forEach(button => button.addEventListener("click", () => finish(actions[Number(button.dataset.choice)].value)));
+      document.body.append(backdrop);
+      document.addEventListener("keydown", onKeydown);
+      backdrop.querySelector("[data-choice]")?.focus();
+    });
+  }
   const persistLayout = () => localStorage.setItem("ytll-layout", JSON.stringify(state.layout));
   const youtubeId = value => { try { const url = new URL(value); if (url.hostname.includes("youtu.be")) return url.pathname.slice(1); return url.searchParams.get("v") || url.pathname.split("/").filter(Boolean).pop(); } catch { return ""; } };
+  const languageDisplay = new Intl.DisplayNames(["ru"], { type: "language" });
+  const languageName = code => { try { return languageDisplay.of(code) || String(code).toUpperCase(); } catch { return String(code).toUpperCase(); } };
+  const sortLanguages = languages => [...languages].sort((left, right) => languageName(left).localeCompare(languageName(right), "ru", { sensitivity: "base" }));
+  const captionPreferences = () => state.library?.preferences || state.settings?.languages || { studyLanguage: "en", translationLanguage: "ru" };
+  const studyLanguage = () => state.captions.active?.studyLanguage || captionPreferences().studyLanguage;
+  const translationLanguage = () => state.captions.active?.translationLanguage || captionPreferences().translationLanguage;
+  const trackFor = language => window.LanguageModel.preferredTrack(state.captions, language);
+  const studyTrack = () => trackFor(studyLanguage());
+  const translationTrack = () => trackFor(translationLanguage());
+  function selectableLanguages() {
+    return sortLanguages([...new Set([...(state.settings?.languages?.enabled || ["en", "ru"]), ...Object.values(state.captions.tracks || {}).map(track => track.language), studyLanguage(), translationLanguage()])].filter(Boolean));
+  }
+  function languageOptions(selected) {
+    return `${selectableLanguages().map(language => `<option value="${escapeHtml(language)}" ${language === selected ? "selected" : ""}>${escapeHtml(languageName(language))}</option>`).join("")}<option value="__other__">Другой язык…</option>`;
+  }
+  function showLanguagePicker() {
+    return new Promise(resolve => {
+      const backdrop = document.createElement("div");
+      backdrop.className = "dialog-backdrop";
+      const options = sortLanguages(window.LanguageModel.SUPPORTED_LANGUAGES).map(language => `<option value="${language}">${escapeHtml(languageName(language))}</option>`).join("");
+      backdrop.innerHTML = `<form class="dialog-card language-picker"><h2>Выберите язык</h2><input name="search" placeholder="Поиск языка…" autocomplete="off" /><select name="language" size="10">${options}</select><label class="language-picker-check"><input type="checkbox" name="remember" checked /> Добавить в «Мои языки»</label><div class="form-actions"><button type="button" class="subtle-button" data-cancel>Отмена</button><button class="primary" type="submit">Выбрать</button></div></form>`;
+      const form = backdrop.querySelector("form");
+      const select = form.elements.language;
+      const finish = value => { backdrop.remove(); resolve(value); };
+      form.elements.search.addEventListener("input", () => {
+        const query = form.elements.search.value.trim().toLocaleLowerCase("ru");
+        [...select.options].forEach(option => { option.hidden = Boolean(query) && !option.text.toLocaleLowerCase("ru").includes(query) && !option.value.includes(query); });
+        const first = [...select.options].find(option => !option.hidden);
+        if (first) first.selected = true;
+      });
+      form.addEventListener("submit", async event => {
+        event.preventDefault();
+        const language = select.value;
+        if (!language) return;
+        if (form.elements.remember.checked && !state.settings.languages.enabled.includes(language)) {
+          const next = clone(state.settings);
+          next.languages.enabled.push(language);
+          state.settings = await window.appAPI.saveSettings({ settings: next });
+        }
+        finish(language);
+      });
+      backdrop.addEventListener("click", event => { if (event.target === backdrop) finish(null); });
+      form.querySelector("[data-cancel]").addEventListener("click", () => finish(null));
+      document.body.append(backdrop);
+      form.elements.search.focus();
+    });
+  }
   function activeYoutubeId() {
     const video = state.playerVideoId && state.library ? findNode(state.playerVideoId) : null;
     return youtubeId(video?.type === "video" ? video.url : state.playerUrl);
@@ -165,7 +226,7 @@
   function renderFolderInspector(folder) {
     if (folder.id === "root") {
       const items = state.libraries.libraries.map(item => `<button class="library-overview-row ${item.id === activeLibraryId() ? "active" : ""}" data-library-select="${item.id}"><span class="node-icon">${icon("library", "tree-node-icon")}</span><span><strong>${escapeHtml(item.name)}</strong><small>${item.id === activeLibraryId() ? "Текущая библиотека" : "Переключиться"}</small></span>${item.id === activeLibraryId() ? '<span class="node-chip">Текущая</span>' : ""}</button>`).join("");
-      return `<section class="library-overview"><header class="inspector-header"><div><p class="eyebrow">Библиотеки</p><h1 class="view-title">Управление библиотеками</h1><p class="hint">Каждая библиотека хранит отдельные ролики, прогресс и субтитры.</p></div></header><div class="library-overview-list">${items}</div><div class="form-actions"><button class="primary" id="createLibraryMain">Новая библиотека</button><button class="subtle-button" id="importLibraryMain">Импортировать</button><button class="subtle-button" id="manageLibrariesMain">Настроить библиотеки</button><button class="subtle-button" id="showBackupsMain">Резервные копии</button></div></section>`;
+      return `<section class="library-overview"><header class="inspector-header"><div><p class="eyebrow">Библиотеки</p><h1 class="view-title">Управление библиотеками</h1><p class="hint">Каждая библиотека хранит отдельные ролики, прогресс и субтитры.</p></div></header><div class="language-summary"><strong>${escapeHtml(languageName(state.library.preferences.studyLanguage))} → ${escapeHtml(languageName(state.library.preferences.translationLanguage))}</strong><span>Языковая пара этой библиотеки</span></div><div class="library-overview-list">${items}</div><div class="form-actions"><button class="primary" id="createLibraryMain">Новая библиотека</button><button class="subtle-button" id="libraryLanguages">Языки библиотеки</button><button class="subtle-button" id="importLibraryMain">Импортировать</button><button class="subtle-button" id="manageLibrariesMain">Настроить библиотеки</button><button class="subtle-button" id="showBackupsMain">Резервные копии</button></div></section>`;
     }
     const videos = directChildren(folder).length;
     return `<header class="inspector-header"><div><p class="eyebrow">Папка</p><h1 class="view-title">${escapeHtml(folder.name)}</h1></div><span class="node-chip">${videos} роликов</span></header><form class="form folder-form" id="folderForm"><label class="field">YouTube-плейлист<div class="playlist-input"><input name="playlistUrl" value="${escapeHtml(folder.playlistUrl || "")}" placeholder="https://www.youtube.com/watch?v=…&list=…" autocomplete="off" /><button class="subtle-button folder-action" type="button" id="openPlaylist" title="Открыть плейлист в браузере" aria-label="Открыть плейлист в браузере">${icon("externalLink")}</button></div></label><p class="hint">Ссылка сохраняется только для этой папки.</p><label class="field">Добавить ролики из плейлиста<div class="playlist-input"><input name="importPlaylistUrl" placeholder="https://www.youtube.com/playlist?list=…" autocomplete="off" /><button class="primary playlist-import-button" type="button" id="importPlaylistVideos">Добавить</button></div></label><p class="hint">Поле используется только для загрузки списка роликов; ссылка не сохраняется.</p><div class="form-actions"><button class="primary folder-action" type="submit" title="Сохранить ссылку" aria-label="Сохранить ссылку">${icon("save")}</button><button class="subtle-button folder-action" type="button" data-action="rename" title="Переименовать" aria-label="Переименовать">${icon("edit")}</button><button class="subtle-button folder-action" type="button" data-action="add-video" title="Добавить ролик" aria-label="Добавить ролик">${icon("videoPlus")}</button><button class="subtle-button danger folder-action" type="button" data-action="delete" title="Удалить" aria-label="Удалить">${icon("trash")}</button></div></form>`;
@@ -188,8 +249,18 @@
   }
 
   function captionsMarkup(items, language) {
-    if (!items?.length) return `<p class="caption-empty">${language === "en" ? "Английские субтитры ещё не загружены." : "Русский перевод ещё не создан."}</p>`;
+    if (!items?.length) return `<p class="caption-empty">Дорожка «${escapeHtml(languageName(language))}» ещё не создана.</p>`;
     return items.map(item => `<button class="caption-row" data-caption-language="${language}" data-caption-start="${item.start}" data-caption-id="${item.id}"><span>${Math.floor(item.start / 60)}:${String(Math.floor(item.start % 60)).padStart(2, "0")}</span>${escapeHtml(item.text)}</button>`).join("");
+  }
+  function trackStatus(track) {
+    if (!track) return "Нет дорожки";
+    const sources = { "youtube-manual": "YouTube · авторская", "youtube-auto": "YouTube · автоматическая", "youtube-translation": "YouTube · машинный перевод", whisper: "Whisper · язык речи", openrouter: "OpenRouter · перевод", legacy: "Импортированная" };
+    return `${sources[track.source] || track.source}${track.stale ? " · устарела" : ""}${track.userEdited ? " · исправлена" : ""}`;
+  }
+  function versionSelector(track, language) {
+    const versions = window.LanguageModel.tracksForLanguage(state.captions, language);
+    if (versions.length < 2) return "";
+    return `<select class="track-version" data-track-version="${escapeHtml(language)}" aria-label="Версия дорожки">${versions.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === track?.id ? "selected" : ""}>${escapeHtml(trackStatus(item))} · v${item.revision}</option>`).join("")}</select>`;
   }
   function renderPlayerV2() {
     const video = state.playerVideoId && findNode(state.playerVideoId);
@@ -201,20 +272,35 @@
     const url = escapeHtml(activeUrl || "");
     const player = id ? `<div class="video-frame"><div id="youtubePlayer" aria-label="${title}"></div></div>` : `<div class="video-empty"><strong>Вставьте YouTube-ссылку</strong><p>Нажмите Play, чтобы открыть ролик без сохранения.</p></div>`;
     const translationReady = state.settings?.translation?.hasApiKey;
+    const study = studyTrack();
+    const translated = translationTrack();
+    const studyCode = studyLanguage();
+    const translationCode = translationLanguage();
+    const leftTrack = state.layout.swapped ? translated : study;
+    const rightTrack = state.layout.swapped ? study : translated;
+    const leftCode = state.layout.swapped ? translationCode : studyCode;
+    const rightCode = state.layout.swapped ? studyCode : translationCode;
     const toolButton = (className, attributes, iconName, label) => `<button class="${className}" ${attributes} title="${label}" aria-label="${label}">${icon(iconName)}</button>`;
-    const actions = id ? `${toolButton("mode-button", 'id="loadEnglish"', "download", "Загрузить английские субтитры")}${toolButton(`mode-button ${translationReady ? "" : "needs-key"}`, 'id="translateRussian"', "translate", translationReady ? "Перевести на русский" : "Настроить ключ OpenRouter")}` : "";
+    const actions = id ? `${toolButton("mode-button", 'id="loadStudyTrack"', "download", `Получить дорожку «${languageName(studyCode)}»`)}${toolButton(`mode-button ${translationReady ? "" : "needs-key"}`, 'id="createTranslationTrack"', "translate", `Создать дорожку «${languageName(translationCode)}»`)}` : "";
     const playbackControls = `${toolButton("control", 'data-player="back"', "back", "Назад на 5 секунд")}${toolButton("control", 'data-player="play"', "play", "Воспроизвести или поставить на паузу")}${toolButton("control", 'data-player="forward"', "forward", "Вперёд на 5 секунд")}<span class="controls-divider" aria-hidden="true"></span>${toolButton("control", 'data-player="previous"', "previous", "Повторить предыдущую реплику")}${toolButton("control", 'data-player="repeat"', "repeat", "Повторить текущую реплику")}`;
-    return shell(`<section class="view player-view ${mode === "center" ? "center-mode" : ""}"><header class="player-head"><form class="player-link-form" id="playerLinkForm"><input name="url" value="${url}" placeholder="Вставьте YouTube-ссылку…" autocomplete="off" />${toolButton("subtle-button", 'type="submit"', "play", "Открыть ролик")}${toolButton("primary", 'type="button" id="addRootVideo"', "listPlus", "Сохранить ролик в библиотеку")}</form><div class="layout-actions">${actions}</div></header><section class="learning-stage"><aside class="caption-panel ${state.layout.english ? "" : "collapsed"}"><header class="caption-head">English <span>${state.captions.english.length}</span></header><div class="caption-list">${captionsMarkup(state.captions.english, "en")}</div></aside><section class="video-zone"><h1 class="player-title">${title}</h1>${player}<div class="center-captions"><b>${state.captions.english[0]?.text || "Субтитры по центру"}</b>${state.captions.russian[0]?.text || "Загрузите английскую дорожку и создайте перевод."}</div><nav class="study-controls" aria-label="Управление просмотром">${playbackControls}<span class="controls-divider" aria-hidden="true"></span>${["0.5","0.75","1","1.5","2"].map(rate => `<button class="control rate-control ${rate === "1" ? "active" : ""}" data-rate="${rate}" aria-label="Скорость ${rate}">${rate}×</button>`).join("")}</nav></section><aside class="caption-panel ${state.layout.russian ? "" : "collapsed"}"><header class="caption-head">Русский <span>${state.captions.russian.length}</span></header><div class="caption-list">${captionsMarkup(state.captions.russian, "ru")}</div></aside></section></section>`);
+    const leftRole = state.layout.swapped ? "translation" : "study";
+    const rightRole = state.layout.swapped ? "study" : "translation";
+    const leftHead = `<div class="track-heading"><select id="${leftRole}Language" aria-label="${leftRole === "study" ? "Изучаемый язык" : "Язык перевода"}">${languageOptions(leftCode)}</select><small>${escapeHtml(trackStatus(leftTrack))}</small>${versionSelector(leftTrack, leftCode)}</div><span>${leftTrack?.segments.length || 0}</span>`;
+    const rightHead = `<div class="track-heading"><select id="${rightRole}Language" aria-label="${rightRole === "study" ? "Изучаемый язык" : "Язык перевода"}">${languageOptions(rightCode)}</select><small>${escapeHtml(trackStatus(rightTrack))}</small>${versionSelector(rightTrack, rightCode)}</div><span>${rightTrack?.segments.length || 0}</span>`;
+    return shell(`<section class="view player-view ${mode === "center" ? "center-mode" : ""}"><header class="player-head"><form class="player-link-form" id="playerLinkForm"><input name="url" value="${url}" placeholder="Вставьте YouTube-ссылку…" autocomplete="off" />${toolButton("subtle-button", 'type="submit"', "play", "Открыть ролик")}${toolButton("primary", 'type="button" id="addRootVideo"', "listPlus", "Сохранить ролик в библиотеку")}</form><div class="layout-actions">${actions}${toolButton("mode-button", 'id="swapLanguages"', "translate", "Поменять дорожки местами")}</div></header><section class="learning-stage"><aside class="caption-panel ${state.layout.english ? "" : "collapsed"}"><header class="caption-head">${leftHead}</header><div class="caption-list">${captionsMarkup(leftTrack?.segments, leftCode)}</div></aside><section class="video-zone"><h1 class="player-title">${title}</h1>${player}<div class="center-captions"><b>${escapeHtml(study?.segments[0]?.text || "Субтитры по центру")}</b>${escapeHtml(translated?.segments[0]?.text || `Создайте перевод на ${languageName(translationCode)}.`)}</div><nav class="study-controls" aria-label="Управление просмотром">${playbackControls}<span class="controls-divider" aria-hidden="true"></span>${["0.5","0.75","1","1.5","2"].map(rate => `<button class="control rate-control ${rate === "1" ? "active" : ""}" data-rate="${rate}" aria-label="Скорость ${rate}">${rate}×</button>`).join("")}</nav></section><aside class="caption-panel ${state.layout.russian ? "" : "collapsed"}"><header class="caption-head">${rightHead}</header><div class="caption-list">${captionsMarkup(rightTrack?.segments, rightCode)}</div></aside></section></section>`);
   }
   function renderSettings() {
     const s = state.settings; const t = s.translation; const tr = s.transcription;
     const selected = state.settingsSection;
     const menuItem = (id, label) => `<button type="button" class="settings-nav-item ${selected === id ? "active" : ""}" data-settings-section="${id}" aria-current="${selected === id ? "page" : "false"}">${label}</button>`;
-    return shell(`<section class="view settings-view"><form class="settings-layout" id="settingsForm"><aside class="settings-nav" aria-label="Разделы настроек"><p class="settings-nav-label">Настройки</p>${menuItem("appearance", "Внешний вид")}${menuItem("translation", "Перевод OpenRouter")}${menuItem("transcription", "Локальная транскрибация")}</aside><main class="settings-main"><header class="settings-head"><div><p class="eyebrow">Настройки</p><h1 class="view-title">Локальная конфигурация</h1><p class="hint">Файлы настроек сохраняются рядом с переносным приложением.</p></div><div class="settings-actions"><button type="button" class="subtle-button" id="resetSettings">Сбросить</button><button class="primary" type="submit">Сохранить настройки</button></div></header><section class="settings-group ${selected === "appearance" ? "active" : ""}" data-settings-panel="appearance"><h2>Внешний вид</h2><label class="settings-row"><span><strong>Тема</strong><small>Светлая или тёмная оболочка.</small></span><select name="theme"><option value="dark" ${s.theme === "dark" ? "selected" : ""}>Тёмная</option><option value="light" ${s.theme === "light" ? "selected" : ""}>Светлая</option></select></label><label class="settings-row"><span><strong>Примеры для пустой библиотеки</strong><small>При следующем запуске предложить загрузить учебные примеры.</small></span><input name="defaultLibraryOfferEnabled" type="checkbox" ${s.onboarding.defaultLibraryOfferEnabled ? "checked" : ""} /></label></section><section class="settings-group ${selected === "translation" ? "active" : ""}" data-settings-panel="translation"><h2>Перевод OpenRouter</h2><label class="settings-row"><span><strong>API-ключ</strong><small>${t.hasApiKey ? "Ключ сохранён в зашифрованном виде. Оставьте пустым, чтобы не менять." : "Ключ ещё не сохранён."}</small></span><input name="apiKey" type="password" placeholder="sk-or-v1-…" /></label><label class="settings-row"><span><strong>Модель перевода</strong><small>Используется для пакетного перевода реплик.</small></span><input name="model" value="${escapeHtml(t.model)}" /></label></section><section class="settings-group ${selected === "transcription" ? "active" : ""}" data-settings-panel="transcription"><h2>Локальная транскрибация</h2><label class="settings-row"><span><strong>Каталог моделей</strong><small>Уже скачанная модель faster-whisper.</small></span><input name="modelRoot" value="${escapeHtml(tr.modelRoot)}" /></label><label class="settings-row"><span><strong>Модель</strong><small>Используется только после согласия на локальную транскрибацию.</small></span><input name="whisperModel" value="${escapeHtml(tr.model)}" /></label><label class="settings-row"><span><strong>Команда uv</strong><small>Запускает независимый скрипт транскрибации.</small></span><input name="uvPath" value="${escapeHtml(tr.uvPath)}" /></label><label class="settings-row"><span><strong>Команда yt-dlp</strong><small>Временно скачивает аудио только с подтверждения пользователя.</small></span><input name="ytDlpPath" value="${escapeHtml(tr.ytDlpPath)}" /></label></section></main></form></section>`);
+    const allLanguageOptions = sortLanguages(window.LanguageModel.SUPPORTED_LANGUAGES).map(language => `<option value="${language}" ${s.languages.enabled.includes(language) ? "selected" : ""}>${escapeHtml(languageName(language))}</option>`).join("");
+    const enabledOptions = sortLanguages(s.languages.enabled).map(language => `<option value="${language}">${escapeHtml(languageName(language))}</option>`).join("");
+    const languageTags = sortLanguages(s.languages.enabled).map(language => `<button type="button" class="language-tag" data-language-tag="${language}" aria-label="Удалить язык: ${escapeHtml(languageName(language))}">${escapeHtml(languageName(language))}<small>${escapeHtml(language.toUpperCase())}</small><b aria-hidden="true">×</b></button>`).join("");
+    return shell(`<section class="view settings-view"><form class="settings-layout" id="settingsForm"><aside class="settings-nav" aria-label="Разделы настроек"><p class="settings-nav-label">Настройки</p>${menuItem("appearance", "Внешний вид")}${menuItem("languages", "Языки")}${menuItem("translation", "Перевод OpenRouter")}${menuItem("transcription", "Локальная транскрибация")}</aside><main class="settings-main"><header class="settings-head"><div><p class="eyebrow">Настройки</p><h1 class="view-title">Локальная конфигурация</h1><p class="hint">Общие языки используются для новых библиотек и временных роликов.</p></div><div class="settings-actions"><button type="button" class="subtle-button" id="resetSettings">Сбросить</button><button class="primary" type="submit">Сохранить настройки</button></div></header><section class="settings-group ${selected === "appearance" ? "active" : ""}" data-settings-panel="appearance"><h2>Внешний вид</h2><label class="settings-row"><span><strong>Тема</strong><small>Светлая или тёмная оболочка.</small></span><select name="theme"><option value="dark" ${s.theme === "dark" ? "selected" : ""}>Тёмная</option><option value="light" ${s.theme === "light" ? "selected" : ""}>Светлая</option></select></label><label class="settings-row"><span><strong>Примеры для пустой библиотеки</strong><small>При следующем запуске предложить загрузить учебные примеры.</small></span><input name="defaultLibraryOfferEnabled" type="checkbox" ${s.onboarding.defaultLibraryOfferEnabled ? "checked" : ""} /></label></section><section class="settings-group ${selected === "languages" ? "active" : ""}" data-settings-panel="languages"><label class="settings-row"><span><strong>Доступные языки</strong><small>Они первыми отображаются в селекторах плеера.</small><span class="language-tags" id="languageTags" aria-label="Выбранные языки">${languageTags || '<span class="language-tags-empty">Выберите хотя бы один язык</span>'}</span></span><select name="enabledLanguages" multiple size="12">${allLanguageOptions}</select></label><label class="settings-row"><span><strong>Изучаемый язык по умолчанию</strong><small>Используется при создании новой библиотеки.</small></span><select name="studyLanguage">${enabledOptions.replace(`value="${s.languages.studyLanguage}"`, `value="${s.languages.studyLanguage}" selected`)}</select></label><label class="settings-row"><span><strong>Язык перевода по умолчанию</strong></span><select name="translationLanguage">${enabledOptions.replace(`value="${s.languages.translationLanguage}"`, `value="${s.languages.translationLanguage}" selected`)}</select></label><label class="settings-row"><span><strong>Порог определения языка</strong><small>Ниже этого значения приложение попросит подтвердить язык речи.</small></span><input name="detectionThreshold" type="number" min="0.5" max="0.99" step="0.01" value="${s.languages.detectionThreshold}" /></label></section><section class="settings-group ${selected === "translation" ? "active" : ""}" data-settings-panel="translation"><h2>Перевод OpenRouter</h2><label class="settings-row"><span><strong>API-ключ</strong><small>${t.hasApiKey ? "Ключ сохранён в зашифрованном виде. Оставьте пустым, чтобы не менять." : "Ключ ещё не сохранён."}</small></span><input name="apiKey" type="password" placeholder="sk-or-v1-…" /></label><label class="settings-row"><span><strong>Модель перевода</strong><small>Используется для пакетного перевода реплик.</small></span><input name="model" value="${escapeHtml(t.model)}" /></label></section><section class="settings-group ${selected === "transcription" ? "active" : ""}" data-settings-panel="transcription"><h2>Локальная транскрибация</h2><label class="settings-row"><span><strong>Каталог моделей</strong><small>Уже скачанная модель faster-whisper.</small></span><input name="modelRoot" value="${escapeHtml(tr.modelRoot)}" /></label><label class="settings-row"><span><strong>Модель</strong><small>Используется только после согласия на локальную транскрибацию.</small></span><input name="whisperModel" value="${escapeHtml(tr.model)}" /></label><label class="settings-row"><span><strong>Команда uv</strong></span><input name="uvPath" value="${escapeHtml(tr.uvPath)}" /></label><label class="settings-row"><span><strong>Команда yt-dlp</strong></span><input name="ytDlpPath" value="${escapeHtml(tr.ytDlpPath)}" /></label></section></main></form></section>`);
   }
 
   function currentCaption(time) {
-    return window.CaptionSync.findCurrentCaption(state.captions.english || [], Number(time));
+    return window.CaptionSync.findCurrentCaption(studyTrack()?.segments || [], Number(time));
   }
 
   function scrollCaptionIntoView(language, captionId, smooth = true) {
@@ -243,20 +329,28 @@
 
   function syncCaptionsToTime(time) {
     const active = currentCaption(time);
+    const translatedActive = window.CaptionSync.findCurrentCaption(translationTrack()?.segments || [], Number(time));
     const captionId = active?.id || "";
+    const activeByLanguage = new Map([
+      [studyLanguage(), active?.id || ""],
+      [translationLanguage(), translatedActive?.id || ""]
+    ]);
     const changed = captionId !== state.activeCaptionId;
     const renderedActiveId = document.querySelector(".caption-row.active")?.dataset.captionId || "";
     const needsPositionRestore = captionId && renderedActiveId !== captionId;
     state.activeCaptionId = captionId;
-    document.querySelectorAll(".caption-row").forEach(row => row.classList.toggle("active", row.dataset.captionId === captionId));
+    document.querySelectorAll(".caption-row").forEach(row => row.classList.toggle("active", row.dataset.captionId === activeByLanguage.get(row.dataset.captionLanguage)));
     const center = document.querySelector(".center-captions");
     if (center && active) {
-      const translated = state.captions.russian.find(item => item.id === captionId);
+      const translated = translationTrack()?.segments.find(item => item.id === captionId)
+        || translationTrack()?.segments.find(item => Math.abs(item.start - active.start) < 0.35);
       center.innerHTML = `<b>${escapeHtml(active.text)}</b>${escapeHtml(translated?.text || "")}`;
     }
     if ((!changed && !needsPositionRestore) || !captionId) return;
-    if (state.follow.en) scrollCaptionIntoView("en", captionId, false);
-    if (state.follow.ru) scrollCaptionIntoView("ru", captionId, false);
+    const leftActiveId = document.querySelector('.caption-list[data-language="left"] .caption-row.active')?.dataset.captionId;
+    const rightActiveId = document.querySelector('.caption-list[data-language="right"] .caption-row.active')?.dataset.captionId;
+    if (state.follow.left && leftActiveId) scrollCaptionIntoView("left", leftActiveId, false);
+    if (state.follow.right && rightActiveId) scrollCaptionIntoView("right", rightActiveId, false);
   }
 
   function stopCaptionSync() {
@@ -270,13 +364,13 @@
   function setupCaptionPanels() {
     document.querySelectorAll("[data-toggle-panel]").forEach(button => button.remove());
     const panels = document.querySelectorAll(".caption-panel");
-    [[panels[0], "en"], [panels[1], "ru"]].forEach(([panel, language]) => {
+    [[panels[0], "left"], [panels[1], "right"]].forEach(([panel, language]) => {
       if (!panel) return;
       const list = panel.querySelector(".caption-list");
       const head = panel.querySelector(".caption-head");
       if (!list || !head) return;
       list.dataset.language = language;
-      const panelKey = language === "en" ? "english" : "russian";
+      const panelKey = language === "left" ? "english" : "russian";
       const collapse = document.createElement("button");
       collapse.type = "button";
       collapse.className = "panel-collapse";
@@ -292,9 +386,9 @@
       follow.dataset.follow = language;
       follow.textContent = "К текущей реплике";
       follow.addEventListener("click", () => setFollow(language, true));
-      if (language === "en") head.prepend(collapse);
+      if (language === "left") head.prepend(collapse);
       head.append(follow);
-      if (language === "ru") head.append(collapse);
+      if (language === "right") head.append(collapse);
       list.addEventListener("wheel", () => setFollow(language, false), { passive: true });
       list.addEventListener("touchmove", () => setFollow(language, false), { passive: true });
       list.addEventListener("pointerdown", event => {
@@ -327,7 +421,7 @@
       const isLeft = key === "english";
       const expanded = state.layout[key];
       const direction = isLeft ? (expanded ? "chevronLeft" : "chevronRight") : (expanded ? "chevronRight" : "chevronLeft");
-      const label = `${expanded ? "Свернуть" : "Развернуть"} ${isLeft ? "английские" : "русские"} субтитры`;
+      const label = `${expanded ? "Свернуть" : "Развернуть"} ${isLeft ? "левую" : "правую"} дорожку`;
       button.innerHTML = icon(direction, "panel-chevron");
       button.title = label;
       button.setAttribute("aria-label", label);
@@ -441,71 +535,115 @@
     const generation = state.captionGeneration;
     try {
       let captions = await window.appAPI.getCaptions(context.key, activeLibraryId());
-      if (context.isLibraryVideo && (!captions.english.length || !captions.russian.length)) {
+      if (context.isLibraryVideo && !Object.keys(captions.tracks || {}).length) {
         const previewCaptions = await window.appAPI.getCaptions(context.previewKey, activeLibraryId());
-        const merged = {
-          ...captions,
-          english: captions.english.length ? captions.english : previewCaptions.english,
-          russian: captions.russian.length ? captions.russian : previewCaptions.russian,
-          studiedIds: captions.studiedIds?.length ? captions.studiedIds : previewCaptions.studiedIds,
-        };
-        if (merged.english.length !== captions.english.length || merged.russian.length !== captions.russian.length) {
-          captions = await window.appAPI.saveCaptions(context.key, merged, activeLibraryId());
-        }
+        if (Object.keys(previewCaptions.tracks || {}).length) captions = await window.appAPI.saveCaptions(context.key, previewCaptions, activeLibraryId());
       }
       if (generation !== state.captionGeneration || context.youtubeId !== activeYoutubeId()) return;
       state.captions = captions;
       render();
-      if (automaticDownload && !captions.english.length) downloadEnglishForActive(false, generation);
+      if (automaticDownload && !studyTrack()) showToast(`Для ролика пока нет дорожки «${languageName(studyLanguage())}»`);
     } catch (error) {
       if (generation === state.captionGeneration) showToast(error.message);
     }
   }
-  async function downloadEnglishForActive(confirmDownload = true, expectedGeneration = state.captionGeneration) {
+  async function saveCaptionDocument() {
+    const context = activeCaptionContext();
+    if (!context) return;
+    state.captions = await window.appAPI.saveCaptions(context.key, state.captions, activeLibraryId());
+  }
+  async function translateWithOpenRouter(sourceLanguage, targetLanguage, expectedGeneration = state.captionGeneration) {
+    const context = activeCaptionContext();
+    if (!context) return null;
+    if (!state.settings?.translation?.hasApiKey) { state.activeTab = "settings"; state.settingsSection = "translation"; render(); showToast("Введите и сохраните ключ OpenRouter"); return null; }
+    showToast(`Перевожу на ${languageName(targetLanguage)} через OpenRouter…`);
+    const captions = await window.appAPI.translateCaptionTrack({ videoId: context.key, sourceLanguage, targetLanguage, libraryId: activeLibraryId() });
+    if (expectedGeneration !== state.captionGeneration || context.youtubeId !== activeYoutubeId()) return null;
+    state.captions = captions;
+    render();
+    return captions;
+  }
+  async function recoverCaptionTrack(language, info, status, expectedGeneration) {
+    const context = activeCaptionContext();
+    const source = trackFor(info.sourceLanguage || state.captions.speechLanguage || studyLanguage());
+    const actions = [];
+    if (source && !window.LanguageModel.sameLanguage(source.language, language) && state.settings?.translation?.hasApiKey) actions.push({ label: "Перевести через OpenRouter", value: "openrouter", primary: true });
+    actions.push({ label: "Распознать через Whisper", value: "whisper", primary: !actions.length });
+    actions.push({ label: "Выбрать локальный файл", value: "local" });
+    actions.push({ label: "Отмена", value: "cancel" });
+    const reason = status === "rate-limited" ? "YouTube временно ограничил запросы (429)." : "YouTube не предоставил нужную дорожку.";
+    const decisionKey = `fallback:${language}`;
+    const remembered = state.captions.decisions[decisionKey]?.choice;
+    const canReuse = remembered === "whisper" || (remembered === "openrouter" && source);
+    const choice = canReuse ? remembered : await showChoiceDialog({ title: "Не удалось получить субтитры", message: `${reason} Можно распознать язык речи локально и затем создать перевод. Выбор сохранится для этого видео.`, actions });
+    if (!choice || choice === "cancel") return null;
+    state.captions.decisions[decisionKey] = { choice };
+    await saveCaptionDocument();
+    if (choice === "openrouter") return translateWithOpenRouter(source.language, language, expectedGeneration);
+    const mediaPath = choice === "local" ? await window.appAPI.selectLocalMedia() : null;
+    if (choice === "local" && !mediaPath) return null;
+    showToast("Запускаю локальное распознавание речи…");
+    let captions = await window.appAPI.transcribeCaptionTrack({ videoId: context.key, url: context.url, mediaPath, language: info.sourceLanguage || "", libraryId: activeLibraryId() });
+    if (expectedGeneration !== state.captionGeneration || context.youtubeId !== activeYoutubeId()) return null;
+    state.captions = captions;
+    let detected = captions.speechLanguage;
+    const detectedTrack = trackFor(detected);
+    const threshold = Number(state.settings?.languages?.detectionThreshold) || 0.75;
+    if (detectedTrack?.confidence != null && detectedTrack.confidence < threshold) {
+      const answer = await showChoiceDialog({ title: "Проверьте язык речи", message: `Whisper предполагает «${languageName(detected)}» с уверенностью ${Math.round(detectedTrack.confidence * 100)}%.`, actions: [{ label: "Подтвердить", value: "confirm", primary: true }, { label: "Выбрать другой", value: "other" }, { label: "Отмена", value: "cancel" }] });
+      if (answer === "cancel" || !answer) { render(); return captions; }
+      if (answer === "other") {
+        const selectedLanguage = await showLanguagePicker();
+        if (!selectedLanguage) { render(); return captions; }
+        const corrected = window.LanguageModel.makeTrack({ ...detectedTrack, id: undefined, language: selectedLanguage, confidence: null, revision: window.LanguageModel.tracksForLanguage(captions, selectedLanguage).length + 1 });
+        window.LanguageModel.addTrack(captions, corrected);
+        captions.speechLanguage = selectedLanguage;
+        detected = selectedLanguage;
+        state.captions = await window.appAPI.saveCaptions(context.key, captions, activeLibraryId());
+      }
+    }
+    if (detected && !window.LanguageModel.sameLanguage(detected, language)) {
+      if (!state.settings?.translation?.hasApiKey) { render(); showToast(`Речь распознана как «${languageName(detected)}». Для перевода настройте OpenRouter.`); return captions; }
+      captions = await translateWithOpenRouter(detected, language, expectedGeneration);
+    } else render();
+    return captions;
+  }
+  async function downloadTrackForActive(language = studyLanguage(), confirmDownload = true, expectedGeneration = state.captionGeneration) {
     const context = activeCaptionContext();
     if (!context) return;
     const libraryId = activeLibraryId();
-    const jobKey = `${libraryId}:${context.key}`;
+    const targetLanguage = window.LanguageModel.normalizeLanguage(language, studyLanguage());
+    const jobKey = `${libraryId}:${context.key}:${targetLanguage}`;
     if (state.captionDownloads.has(jobKey)) return state.captionDownloads.get(jobKey);
-    if (confirmDownload && !confirm("Загрузить доступные английские субтитры с YouTube?")) return;
-    if (!confirmDownload && state.captions.translatedAutoCaptions?.approved === false) return;
+    if (confirmDownload) {
+      const approved = await showChoiceDialog({ title: "Получить дорожку", message: `Найти на YouTube субтитры «${languageName(targetLanguage)}»?`, actions: [{ label: "Продолжить", value: true, primary: true }, { label: "Отмена", value: false }] });
+      if (!approved) return;
+    }
     const job = (async () => {
       try {
-        const trackInfo = await window.appAPI.getEnglishCaptionTrackInfo({ url: context.url });
+        const trackInfo = await window.appAPI.getCaptionTrackInfo({ url: context.url, targetLanguage });
+        if (trackInfo.status === "rate-limited") return recoverCaptionTrack(targetLanguage, trackInfo, "rate-limited", expectedGeneration);
         let allowTranslatedAutomaticTrack = true;
         if (trackInfo.needsTranslatedAutomaticTrack) {
-          const previousChoice = state.captions.translatedAutoCaptions;
+          const decisionKey = `youtube-translation:${targetLanguage}`;
+          const previousChoice = state.captions.decisions[decisionKey];
           if (!previousChoice || previousChoice.sourceLanguage !== trackInfo.sourceLanguage) {
-            const language = new Intl.DisplayNames(["ru"], { type: "language" }).of(trackInfo.sourceLanguage) || trackInfo.sourceLanguage.toUpperCase();
-            const approved = confirm(`В видео нет английской дорожки. YouTube предлагает автоматически созданные субтитры с исходным языком «${language}» и машинным переводом на английский. Загрузить их?`);
-            state.captions = await window.appAPI.saveCaptions(context.key, {
-              ...state.captions,
-              translatedAutoCaptions: { sourceLanguage: trackInfo.sourceLanguage, approved }
-            }, libraryId);
-            if (!approved) { showToast("Загрузка переводных субтитров отменена"); return; }
+            const approved = await showChoiceDialog({ title: "Машинный перевод YouTube", message: `Язык речи — «${languageName(trackInfo.sourceLanguage)}». Загрузить машинный перевод на «${languageName(targetLanguage)}»? Решение сохранится для этого видео.`, actions: [{ label: "Загрузить", value: true, primary: true }, { label: "Не загружать", value: false }] });
+            state.captions.decisions[decisionKey] = { sourceLanguage: trackInfo.sourceLanguage, approved: Boolean(approved) };
+            await saveCaptionDocument();
+            if (!approved) return;
           } else {
             allowTranslatedAutomaticTrack = previousChoice.approved === true;
-            if (!allowTranslatedAutomaticTrack) { showToast("Загрузка переводных субтитров отменена ранее"); return; }
+            if (!allowTranslatedAutomaticTrack) return;
           }
         }
-        showToast("Загружаю английские субтитры…");
-        const result = await window.appAPI.downloadEnglishCaptions({ videoId: context.key, url: context.url, libraryId, allowTranslatedAutomaticTrack });
+        showToast(`Загружаю дорожку «${languageName(targetLanguage)}»…`);
+        const result = await window.appAPI.downloadCaptionTrack({ videoId: context.key, url: context.url, language: targetLanguage, libraryId, allowTranslatedAutomaticTrack });
         if (expectedGeneration !== state.captionGeneration || context.youtubeId !== activeYoutubeId()) return;
-        if (result.status === "rate-limited") {
-          showToast("YouTube временно ограничил загрузку субтитров. Повторите позже или смените сеть.");
-          return;
-        }
-        let captions = result.captions;
-        if (result.status === "missing-track") {
-          const approved = confirm("YouTube не отдал английскую дорожку. Скачать временное видео и распознать речь локально через faster-whisper?");
-          if (!approved) { showToast("Локальное распознавание отменено"); return; }
-          showToast("Скачиваю временное видео и запускаю faster-whisper…");
-          captions = await window.appAPI.transcribeEnglishCaptions({ videoId: context.key, url: context.url, libraryId });
-          if (expectedGeneration !== state.captionGeneration || context.youtubeId !== activeYoutubeId()) return;
-        }
-        state.captions = captions;
+        if (["rate-limited", "missing-track"].includes(result.status)) return recoverCaptionTrack(targetLanguage, trackInfo, result.status, expectedGeneration);
+        state.captions = result.captions;
         render();
-        showToast(`Загружено реплик: ${state.captions.english.length}`);
+        showToast(`Дорожка «${languageName(targetLanguage)}» готова`);
       } catch (error) {
         if (expectedGeneration === state.captionGeneration) showToast(error.message);
       }
@@ -514,24 +652,9 @@
     try { return await job; }
     finally { if (state.captionDownloads.get(jobKey) === job) state.captionDownloads.delete(jobKey); }
   }
-  async function translateActiveCaptions() {
-    const context = activeCaptionContext();
-    if (!context) return;
-    if (!state.settings?.translation?.hasApiKey) { state.activeTab = "settings"; render(); showToast("Введите и сохраните ключ OpenRouter"); return; }
-    const generation = state.captionGeneration;
-    try {
-      showToast("Перевожу субтитры через OpenRouter…");
-      const captions = await window.appAPI.translateCaptions(context.key, activeLibraryId());
-      if (generation !== state.captionGeneration || context.youtubeId !== activeYoutubeId()) return;
-      state.captions = captions;
-      render();
-      showToast("Русский перевод готов");
-    } catch (error) {
-      if (generation === state.captionGeneration) {
-        await loadCaptionsForActive(false);
-        showToast(error.message);
-      }
-    }
+  async function createTranslationForActive() {
+    if (translationTrack()) return showToast("Выбранная дорожка уже готова");
+    return downloadTrackForActive(translationLanguage(), true);
   }
   async function titleForUrl(url) { const result = await window.appAPI.getYoutubeMetadata(url); if (result.warning) showToast("Не удалось получить название; будет использовано «Новый урок»"); return result.title || "Новый урок"; }
   async function playUrl(url) {
@@ -577,7 +700,7 @@
     const video = { id: newId("video"), type: "video", name: "Новый урок", url: cleanUrl, createdAt: new Date().toISOString(), progress: { studied: 0, position: 0 } };
     state.library.root.children.push(video);
     await saveLibrary();
-    if (captionsToKeep.english.length || captionsToKeep.russian.length) await window.appAPI.saveCaptions(video.id, captionsToKeep, activeLibraryId());
+    if (Object.keys(captionsToKeep.tracks || {}).length) await window.appAPI.saveCaptions(video.id, captionsToKeep, activeLibraryId());
     saveCurrentPlayerPosition();
     state.selectedId = video.id;
     state.playerVideoId = video.id;
@@ -890,6 +1013,25 @@
     document.body.append(menu);
   }
   function closeContextMenu() { document.querySelector(".context-menu")?.remove(); }
+  function showLibraryLanguageDialog() {
+    const preferences = state.library.preferences;
+    const languages = sortLanguages(state.settings.languages.enabled);
+    const options = selected => languages.map(language => `<option value="${language}" ${language === selected ? "selected" : ""}>${escapeHtml(languageName(language))}</option>`).join("");
+    const backdrop = document.createElement("div");
+    backdrop.className = "dialog-backdrop";
+    backdrop.innerHTML = `<form class="dialog-card" id="libraryLanguageForm"><h2>Языки библиотеки</h2><label class="field">Изучаемый язык<select name="studyLanguage">${options(preferences.studyLanguage)}</select></label><label class="field">Язык перевода<select name="translationLanguage">${options(preferences.translationLanguage)}</select></label><label class="field">Инструкция для OpenRouter<textarea name="translationInstruction" rows="3" placeholder="Например: переводи максимально буквально">${escapeHtml(preferences.translationInstruction || "")}</textarea></label><div class="form-actions"><button type="button" class="subtle-button" data-dialog-close>Отмена</button><button class="primary" type="submit">Сохранить</button></div></form>`;
+    const close = () => backdrop.remove();
+    backdrop.addEventListener("click", event => { if (event.target === backdrop) close(); });
+    backdrop.querySelector("[data-dialog-close]").addEventListener("click", close);
+    backdrop.querySelector("form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      state.library.preferences = { studyLanguage: form.get("studyLanguage"), translationLanguage: form.get("translationLanguage"), translationInstruction: form.get("translationInstruction").trim() };
+      await saveLibrary();
+      close(); render(); showToast("Языки библиотеки сохранены");
+    });
+    document.body.append(backdrop);
+  }
   function showContextMenu(event, nodeId) {
     event.preventDefault(); closeContextMenu(); state.selectedId = nodeId;
     const node = findNode(nodeId);
@@ -899,7 +1041,7 @@
     document.body.append(menu);
   }
   function playerCommand(command, value) {
-    const result = window.PlayerControls.execute({ player: state.player, command, value, captions: state.captions.english });
+    const result = window.PlayerControls.execute({ player: state.player, command, value, captions: studyTrack()?.segments || [] });
     if (!result.ok) showToast(result.message);
     return result.ok;
   }
@@ -911,6 +1053,7 @@
     document.querySelector("#importLibraryMain")?.addEventListener("click", importLibrary);
     document.querySelector("#manageLibrariesMain")?.addEventListener("click", manageLibraries);
     document.querySelector("#showBackupsMain")?.addEventListener("click", showBackups);
+    document.querySelector("#libraryLanguages")?.addEventListener("click", showLibraryLanguageDialog);
     document.querySelectorAll(".library-overview-row[data-library-select]").forEach(button => button.addEventListener("click", () => switchLibrary(button.dataset.librarySelect)));
     document.querySelectorAll("[data-toggle]").forEach(button => button.addEventListener("click", event => { event.stopPropagation(); const id = button.dataset.toggle; if (state.expanded.has(id)) state.expanded.delete(id); else state.expanded.add(id); render(); }));
     document.querySelectorAll(".tree-row").forEach(row => {
@@ -952,8 +1095,12 @@
     document.querySelector("#openYoutube")?.addEventListener("click", async () => { const url = document.querySelector("#videoForm [name=url]").value.trim(); if (!url) return showToast("Вставьте ссылку на YouTube"); try { await window.appAPI.openYoutube(url); } catch (error) { showToast(error.message); } });
     document.querySelector("#playerLinkForm")?.addEventListener("submit", event => { event.preventDefault(); playUrl(new FormData(event.currentTarget).get("url")); });
     document.querySelector("#addRootVideo")?.addEventListener("click", () => addUrlToRoot(new FormData(document.querySelector("#playerLinkForm")).get("url")));
-    document.querySelector("#loadEnglish")?.addEventListener("click", () => downloadEnglishForActive());
-    document.querySelector("#translateRussian")?.addEventListener("click", translateActiveCaptions);
+    document.querySelector("#loadStudyTrack")?.addEventListener("click", () => downloadTrackForActive(studyLanguage()));
+    document.querySelector("#createTranslationTrack")?.addEventListener("click", createTranslationForActive);
+    document.querySelector("#studyLanguage")?.addEventListener("change", async event => { const language = event.target.value === "__other__" ? await showLanguagePicker() : event.target.value; if (!language) return render(); state.captions.active.studyLanguage = language; await saveCaptionDocument(); render(); if (!studyTrack()) showToast("Для выбранного языка нужно создать дорожку"); });
+    document.querySelector("#translationLanguage")?.addEventListener("change", async event => { const language = event.target.value === "__other__" ? await showLanguagePicker() : event.target.value; if (!language) return render(); state.captions.active.translationLanguage = language; await saveCaptionDocument(); render(); if (!translationTrack()) showToast("Для выбранного языка нужно создать перевод"); });
+    document.querySelectorAll("[data-track-version]").forEach(select => select.addEventListener("change", async () => { window.LanguageModel.setPreferredTrack(state.captions, select.dataset.trackVersion, select.value); await saveCaptionDocument(); render(); }));
+    document.querySelector("#swapLanguages")?.addEventListener("click", () => { saveCurrentPlayerPosition(); state.layout.swapped = !state.layout.swapped; persistLayout(); render(); });
     document.querySelectorAll("[data-caption-start]").forEach(button => button.addEventListener("click", () => playerCommand("seek", button.dataset.captionStart)));
     document.querySelectorAll("[data-mode]").forEach(button => button.addEventListener("click", () => { state.layout.mode = button.dataset.mode; if (state.layout.mode === "columns") { state.layout.english = true; state.layout.russian = true; } persistLayout(); applyPlayerLayout(); }));
     document.querySelectorAll("[data-player]").forEach(button => button.addEventListener("click", () => playerCommand(button.dataset.player))); document.querySelectorAll("[data-rate]").forEach(button => button.addEventListener("click", () => { if (playerCommand("rate", button.dataset.rate)) document.querySelectorAll("[data-rate]").forEach(item => item.classList.toggle("active", item === button)); }));
@@ -966,7 +1113,38 @@
       });
       document.querySelectorAll("[data-settings-panel]").forEach(panel => panel.classList.toggle("active", panel.dataset.settingsPanel === state.settingsSection));
     }));
-    document.querySelector("#settingsForm")?.addEventListener("submit", async event => { event.preventDefault(); const form = new FormData(event.currentTarget); const apiKey = form.get("apiKey"); const payload = { settings: clone(state.settings), apiKey: apiKey ? apiKey : undefined }; payload.settings.theme = form.get("theme"); payload.settings.onboarding.defaultLibraryOfferEnabled = form.get("defaultLibraryOfferEnabled") === "on"; payload.settings.translation.model = form.get("model").trim(); Object.assign(payload.settings.transcription, { modelRoot: form.get("modelRoot").trim(), model: form.get("whisperModel").trim(), uvPath: form.get("uvPath").trim(), ytDlpPath: form.get("ytDlpPath").trim() }); try { state.settings = await window.appAPI.saveSettings(payload); showToast("Настройки сохранены"); render(); } catch (error) { showToast(error.message); } }); document.querySelector("#resetSettings")?.addEventListener("click", async () => { if (!confirm("Сбросить настройки?")) return; state.settings = await window.appAPI.getDefaultSettings(); render(); showToast("Черновик настроек сброшен"); });
+    const enabledLanguagesSelect = document.querySelector('#settingsForm [name="enabledLanguages"]');
+    if (enabledLanguagesSelect) {
+      const refreshLanguagePreview = () => {
+        const selectedLanguages = sortLanguages([...enabledLanguagesSelect.selectedOptions].map(option => option.value));
+        const tags = document.querySelector("#languageTags");
+        if (tags) tags.innerHTML = selectedLanguages.map(language => `<button type="button" class="language-tag" data-language-tag="${language}" aria-label="Удалить язык: ${escapeHtml(languageName(language))}">${escapeHtml(languageName(language))}<small>${escapeHtml(language.toUpperCase())}</small><b aria-hidden="true">×</b></button>`).join("") || '<span class="language-tags-empty">Выберите хотя бы один язык</span>';
+        for (const name of ["studyLanguage", "translationLanguage"]) {
+          const select = document.querySelector(`#settingsForm [name="${name}"]`);
+          if (!select || !selectedLanguages.length) continue;
+          const current = select.value;
+          select.innerHTML = selectedLanguages.map(language => `<option value="${language}" ${language === current ? "selected" : ""}>${escapeHtml(languageName(language))}</option>`).join("");
+          if (!selectedLanguages.includes(current)) select.value = selectedLanguages[0];
+        }
+      };
+      enabledLanguagesSelect.addEventListener("mousedown", event => {
+        const option = event.target.closest("option");
+        if (!option) return;
+        event.preventDefault();
+        option.selected = !option.selected;
+        enabledLanguagesSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      enabledLanguagesSelect.addEventListener("change", refreshLanguagePreview);
+      document.querySelector("#languageTags")?.addEventListener("click", event => {
+        const tag = event.target.closest("[data-language-tag]");
+        if (!tag) return;
+        const option = [...enabledLanguagesSelect.options].find(item => item.value === tag.dataset.languageTag);
+        if (!option) return;
+        option.selected = false;
+        enabledLanguagesSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    }
+    document.querySelector("#settingsForm")?.addEventListener("submit", async event => { event.preventDefault(); const form = new FormData(event.currentTarget); const apiKey = form.get("apiKey"); const payload = { settings: clone(state.settings), apiKey: apiKey ? apiKey : undefined }; payload.settings.theme = form.get("theme"); payload.settings.onboarding.defaultLibraryOfferEnabled = form.get("defaultLibraryOfferEnabled") === "on"; payload.settings.languages = { enabled: form.getAll("enabledLanguages"), studyLanguage: form.get("studyLanguage"), translationLanguage: form.get("translationLanguage"), detectionThreshold: Number(form.get("detectionThreshold")) }; payload.settings.translation.model = form.get("model").trim(); Object.assign(payload.settings.transcription, { modelRoot: form.get("modelRoot").trim(), model: form.get("whisperModel").trim(), uvPath: form.get("uvPath").trim(), ytDlpPath: form.get("ytDlpPath").trim() }); try { state.settings = await window.appAPI.saveSettings(payload); showToast("Настройки сохранены"); render(); } catch (error) { showToast(error.message); } }); document.querySelector("#resetSettings")?.addEventListener("click", async () => { if (!confirm("Сбросить настройки?")) return; state.settings = await window.appAPI.getDefaultSettings(); render(); showToast("Черновик настроек сброшен"); });
     const apiKeyInput = document.querySelector('#settingsForm [name="apiKey"]');
     if (apiKeyInput) {
       const wrapper = document.createElement("div");

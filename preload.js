@@ -21,10 +21,11 @@ contextBridge.exposeInMainWorld("appAPI", {
   openOpenRouterApiKeys: () => ipcRenderer.invoke("openrouter:open-api-keys"),
   getCaptions: (videoId, libraryId) => ipcRenderer.invoke("captions:get", videoId, libraryId),
   saveCaptions: (videoId, captions, libraryId) => ipcRenderer.invoke("captions:save", videoId, captions, libraryId),
-  getEnglishCaptionTrackInfo: payload => ipcRenderer.invoke("captions:english-track-info", payload),
-  downloadEnglishCaptions: payload => ipcRenderer.invoke("captions:download-english", payload),
-  transcribeEnglishCaptions: payload => ipcRenderer.invoke("captions:transcribe-english", payload),
-  translateCaptions: (videoId, libraryId) => ipcRenderer.invoke("captions:translate", videoId, libraryId),
+  getCaptionTrackInfo: payload => ipcRenderer.invoke("captions:track-info", payload),
+  downloadCaptionTrack: payload => ipcRenderer.invoke("captions:download-track", payload),
+  selectLocalMedia: () => ipcRenderer.invoke("captions:select-local-media"),
+  transcribeCaptionTrack: payload => ipcRenderer.invoke("captions:transcribe-track", payload),
+  translateCaptionTrack: payload => ipcRenderer.invoke("captions:translate-track", payload),
   onTranslationProgress: callback => {
     const listener = (_event, progress) => callback(progress);
     ipcRenderer.on("captions:translation-progress", listener);
