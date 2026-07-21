@@ -3,7 +3,7 @@
   "root": {
     "id": "root",
     "type": "folder",
-    "name": "Моя библиотека",
+    "name": "Главная",
     "children": [
       {
         "id": "video-mrrwk9o2-n8nwr",
@@ -11,6 +11,17 @@
         "name": "A real conversation in easy English about hair 💇‍♀️💈: Real Easy English",
         "url": "https://www.youtube.com/watch?v=n0rrgJ4MGdY",
         "createdAt": "2026-07-19T14:40:13.298Z",
+        "progress": {
+          "studied": 0,
+          "position": 0
+        }
+      },
+      {
+        "id": "video-mrsywysm-1diij",
+        "type": "video",
+        "name": "Are you following your dreams? ⏲️ 6 Minute English",
+        "url": "https://www.youtube.com/watch?v=26PrgjTboVQ",
+        "createdAt": "2026-07-20T08:33:51.142Z",
         "progress": {
           "studied": 0,
           "position": 0
@@ -177,17 +188,6 @@
           }
         ],
         "playlistUrl": "https://www.youtube.com/playlist?list=PLcetZ6gSk9692J5Mq2pY4siPVbMCu4v6c"
-      },
-      {
-        "id": "video-mrsywysm-1diij",
-        "type": "video",
-        "name": "Are you following your dreams? ⏲️ 6 Minute English",
-        "url": "https://www.youtube.com/watch?v=26PrgjTboVQ",
-        "createdAt": "2026-07-20T08:33:51.142Z",
-        "progress": {
-          "studied": 0,
-          "position": 0
-        }
       },
       {
         "id": "folder-mrt2onkn-of1km",

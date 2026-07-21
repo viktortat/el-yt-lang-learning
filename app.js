@@ -1,7 +1,7 @@
 (() => {
   const app = document.querySelector("#app");
   const toast = document.querySelector("#toast");
-  const state = { library: null, settings: null, activeTab: "library", settingsSection: "appearance", selectedId: "root", playerVideoId: null, playerUrl: "", previewTitle: "", captions: { english: [], russian: [], studiedIds: [] }, player: null, youTubeReady: false, expanded: new Set(["root"]), layout: JSON.parse(localStorage.getItem("ytll-layout") || '{"mode":"columns","english":true,"russian":true}') };
+  const state = { library: null, libraries: null, settings: null, activeTab: "library", settingsSection: "appearance", selectedId: "root", playerVideoId: null, playerUrl: "", previewTitle: "", captions: { english: [], russian: [], studiedIds: [] }, player: null, youTubeReady: false, expanded: new Set(["root"]), layout: JSON.parse(localStorage.getItem("ytll-layout") || '{"mode":"columns","english":true,"russian":true}') };
   state.layout.leftWidth = Number(state.layout.leftWidth) || 320;
   state.layout.rightWidth = Number(state.layout.rightWidth) || 320;
   if (state.layout.mode === "columns" && !state.layout.english && !state.layout.russian) {
@@ -14,6 +14,7 @@
   state.playerGeneration = 0;
   state.captionGeneration = 0;
   state.captionDownloads = new Map();
+  state.draggedNodeId = "";
   state.positionStore = window.PlaybackPosition.createStore(localStorage);
   state.captionTracker = window.CaptionSync.createTimeTracker({
     getPlayer: () => state.player,
@@ -95,6 +96,8 @@
 
   function walk(node, callback, parent = null) { if (callback(node, parent) === false) return false; if (node.type === "folder") for (const child of node.children || []) if (walk(child, callback, node) === false) return false; }
   function findNode(id) { let found; walk(state.library.root, node => { if (node.id === id) { found = node; return false; } }); return found; }
+  function activeLibrary() { return state.libraries?.libraries.find(item => item.id === state.libraries.activeId); }
+  function activeLibraryId() { return state.libraries?.activeId; }
   function findParent(id) { let found; walk(state.library.root, (node, parent) => { if (node.id === id) { found = parent; return false; } }); return found; }
   function selected() { return findNode(state.selectedId) || state.library.root; }
   async function saveLibrary() { state.library = await window.appAPI.saveLibrary(state.library); }
@@ -107,6 +110,32 @@
     if (result.handled) state.settings.onboarding.defaultLibraryOfferEnabled = false;
   }
   function directChildren(folder) { return (folder.children || []).filter(child => child.type === "video"); }
+  function isDescendantOf(node, possibleAncestor) {
+    let parent = findParent(node.id);
+    while (parent) {
+      if (parent.id === possibleAncestor.id) return true;
+      parent = findParent(parent.id);
+    }
+    return false;
+  }
+  function dropPlacement(row, target, event) {
+    const { top, height } = row.getBoundingClientRect();
+    const offset = event.clientY - top;
+    if (target.type === "folder" && offset > height * .25 && offset < height * .75) return "inside";
+    return offset < height / 2 ? "before" : "after";
+  }
+  function clearDropIndicators() { document.querySelectorAll(".tree-row.drag-over, .tree-row.drop-before, .tree-row.drop-after").forEach(row => row.classList.remove("drag-over", "drop-before", "drop-after")); }
+  function canMoveNode(moving, destination) { return moving && moving.id !== "root" && destination?.type === "folder" && moving.id !== destination.id && !isDescendantOf(destination, moving); }
+  function moveNode(moving, destination, index) {
+    const source = findParent(moving.id);
+    if (!source || !canMoveNode(moving, destination)) return false;
+    const sourceIndex = source.children.findIndex(child => child.id === moving.id);
+    if (sourceIndex < 0) return false;
+    source.children.splice(sourceIndex, 1);
+    const adjustedIndex = source === destination && sourceIndex < index ? index - 1 : index;
+    destination.children.splice(Math.max(0, Math.min(adjustedIndex, destination.children.length)), 0, moving);
+    return true;
+  }
 
   function shell(content) {
     const info = state.info || {};
@@ -129,11 +158,15 @@
   function renderLibrary() {
     const node = selected();
     const inspector = node.type === "video" ? renderVideoInspector(node) : renderFolderInspector(node);
-    return shell(`<section class="view library-view"><aside class="tree-panel"><header class="tree-header"><div><p class="eyebrow">Рабочая папка</p><h1 class="view-title">Библиотека</h1></div><div class="tree-actions"><button class="icon-button tree-tool" id="newFolder" title="Новая папка" aria-label="Новая папка">${icon("folderPlus")}</button><button class="icon-button tree-tool" id="newVideo" title="Добавить ролик" aria-label="Добавить ролик">${icon("videoPlus")}</button><span class="tree-actions-divider" aria-hidden="true"></span><button class="icon-button tree-tool" id="importLibrary" title="Импортировать библиотеку" aria-label="Импортировать библиотеку">${icon("import")}</button><button class="icon-button tree-tool" id="exportLibrary" title="Экспортировать библиотеку" aria-label="Экспортировать библиотеку">${icon("export")}</button><button class="icon-button tree-tool" id="restoreLibrary" title="Восстановить последнюю резервную копию" aria-label="Восстановить последнюю резервную копию">${icon("restore")}</button></div></header><div class="tree">${renderTreeNode(state.library.root)}</div></aside><section class="inspector">${inspector}</section></section>`);
+    const current = activeLibrary();
+    return shell(`<section class="view library-view"><aside class="tree-panel"><header class="tree-header"><div class="library-heading"><p class="eyebrow">Библиотека</p><button class="library-switcher" id="librarySwitcher" aria-haspopup="menu"><span>${escapeHtml(current?.name || "Моя библиотека")}</span>${icon("chevronDown")}</button></div><div class="tree-actions"><button class="icon-button tree-tool" id="newFolder" title="Новая папка" aria-label="Новая папка">${icon("folderPlus")}</button><button class="icon-button tree-tool" id="newVideo" title="Добавить ролик" aria-label="Добавить ролик">${icon("videoPlus")}</button><button class="subtle-button library-manager-button" id="manageLibraries">Библиотеки</button></div></header><div class="tree">${renderTreeNode(state.library.root)}</div></aside><section class="inspector">${inspector}</section></section>`);
   }
 
   function renderFolderInspector(folder) {
-    if (folder.id === "root") return `<div class="inspector-empty"><img class="empty-app-icon" src="assets/yt-lang-learning.ico" alt="" /><strong>Соберите свой учебный маршрут</strong><p>Создайте папку для темы или добавьте YouTube-ролик. Двойной клик откроет ролик в плеере.</p><button class="primary" id="newVideoEmpty">Добавить первый ролик</button></div>`;
+    if (folder.id === "root") {
+      const items = state.libraries.libraries.map(item => `<button class="library-overview-row ${item.id === activeLibraryId() ? "active" : ""}" data-library-select="${item.id}"><span class="node-icon">${icon("library", "tree-node-icon")}</span><span><strong>${escapeHtml(item.name)}</strong><small>${item.id === activeLibraryId() ? "Текущая библиотека" : "Переключиться"}</small></span>${item.id === activeLibraryId() ? '<span class="node-chip">Текущая</span>' : ""}</button>`).join("");
+      return `<section class="library-overview"><header class="inspector-header"><div><p class="eyebrow">Библиотеки</p><h1 class="view-title">Управление библиотеками</h1><p class="hint">Каждая библиотека хранит отдельные ролики, прогресс и субтитры.</p></div></header><div class="library-overview-list">${items}</div><div class="form-actions"><button class="primary" id="createLibraryMain">Новая библиотека</button><button class="subtle-button" id="importLibraryMain">Импортировать</button><button class="subtle-button" id="manageLibrariesMain">Настроить библиотеки</button><button class="subtle-button" id="showBackupsMain">Резервные копии</button></div></section>`;
+    }
     const videos = directChildren(folder).length;
     return `<header class="inspector-header"><div><p class="eyebrow">Папка</p><h1 class="view-title">${escapeHtml(folder.name)}</h1></div><span class="node-chip">${videos} роликов</span></header><form class="form folder-form" id="folderForm"><label class="field">YouTube-плейлист<div class="playlist-input"><input name="playlistUrl" value="${escapeHtml(folder.playlistUrl || "")}" placeholder="https://www.youtube.com/watch?v=…&list=…" autocomplete="off" /><button class="subtle-button folder-action" type="button" id="openPlaylist" title="Открыть плейлист в браузере" aria-label="Открыть плейлист в браузере">${icon("externalLink")}</button></div></label><p class="hint">Ссылка сохраняется только для этой папки.</p><label class="field">Добавить ролики из плейлиста<div class="playlist-input"><input name="importPlaylistUrl" placeholder="https://www.youtube.com/playlist?list=…" autocomplete="off" /><button class="primary playlist-import-button" type="button" id="importPlaylistVideos">Добавить</button></div></label><p class="hint">Поле используется только для загрузки списка роликов; ссылка не сохраняется.</p><div class="form-actions"><button class="primary folder-action" type="submit" title="Сохранить ссылку" aria-label="Сохранить ссылку">${icon("save")}</button><button class="subtle-button folder-action" type="button" data-action="rename" title="Переименовать" aria-label="Переименовать">${icon("edit")}</button><button class="subtle-button folder-action" type="button" data-action="add-video" title="Добавить ролик" aria-label="Добавить ролик">${icon("videoPlus")}</button><button class="subtle-button danger folder-action" type="button" data-action="delete" title="Удалить" aria-label="Удалить">${icon("trash")}</button></div></form>`;
   }
@@ -407,9 +440,9 @@
     if (!context) return;
     const generation = state.captionGeneration;
     try {
-      let captions = await window.appAPI.getCaptions(context.key);
+      let captions = await window.appAPI.getCaptions(context.key, activeLibraryId());
       if (context.isLibraryVideo && (!captions.english.length || !captions.russian.length)) {
-        const previewCaptions = await window.appAPI.getCaptions(context.previewKey);
+        const previewCaptions = await window.appAPI.getCaptions(context.previewKey, activeLibraryId());
         const merged = {
           ...captions,
           english: captions.english.length ? captions.english : previewCaptions.english,
@@ -417,7 +450,7 @@
           studiedIds: captions.studiedIds?.length ? captions.studiedIds : previewCaptions.studiedIds,
         };
         if (merged.english.length !== captions.english.length || merged.russian.length !== captions.russian.length) {
-          captions = await window.appAPI.saveCaptions(context.key, merged);
+          captions = await window.appAPI.saveCaptions(context.key, merged, activeLibraryId());
         }
       }
       if (generation !== state.captionGeneration || context.youtubeId !== activeYoutubeId()) return;
@@ -431,19 +464,43 @@
   async function downloadEnglishForActive(confirmDownload = true, expectedGeneration = state.captionGeneration) {
     const context = activeCaptionContext();
     if (!context) return;
-    if (state.captionDownloads.has(context.key)) return state.captionDownloads.get(context.key);
+    const libraryId = activeLibraryId();
+    const jobKey = `${libraryId}:${context.key}`;
+    if (state.captionDownloads.has(jobKey)) return state.captionDownloads.get(jobKey);
     if (confirmDownload && !confirm("Загрузить доступные английские субтитры с YouTube?")) return;
+    if (!confirmDownload && state.captions.translatedAutoCaptions?.approved === false) return;
     const job = (async () => {
       try {
+        const trackInfo = await window.appAPI.getEnglishCaptionTrackInfo({ url: context.url });
+        let allowTranslatedAutomaticTrack = true;
+        if (trackInfo.needsTranslatedAutomaticTrack) {
+          const previousChoice = state.captions.translatedAutoCaptions;
+          if (!previousChoice || previousChoice.sourceLanguage !== trackInfo.sourceLanguage) {
+            const language = new Intl.DisplayNames(["ru"], { type: "language" }).of(trackInfo.sourceLanguage) || trackInfo.sourceLanguage.toUpperCase();
+            const approved = confirm(`В видео нет английской дорожки. YouTube предлагает автоматически созданные субтитры с исходным языком «${language}» и машинным переводом на английский. Загрузить их?`);
+            state.captions = await window.appAPI.saveCaptions(context.key, {
+              ...state.captions,
+              translatedAutoCaptions: { sourceLanguage: trackInfo.sourceLanguage, approved }
+            }, libraryId);
+            if (!approved) { showToast("Загрузка переводных субтитров отменена"); return; }
+          } else {
+            allowTranslatedAutomaticTrack = previousChoice.approved === true;
+            if (!allowTranslatedAutomaticTrack) { showToast("Загрузка переводных субтитров отменена ранее"); return; }
+          }
+        }
         showToast("Загружаю английские субтитры…");
-        const result = await window.appAPI.downloadEnglishCaptions({ videoId: context.key, url: context.url });
+        const result = await window.appAPI.downloadEnglishCaptions({ videoId: context.key, url: context.url, libraryId, allowTranslatedAutomaticTrack });
         if (expectedGeneration !== state.captionGeneration || context.youtubeId !== activeYoutubeId()) return;
+        if (result.status === "rate-limited") {
+          showToast("YouTube временно ограничил загрузку субтитров. Повторите позже или смените сеть.");
+          return;
+        }
         let captions = result.captions;
         if (result.status === "missing-track") {
           const approved = confirm("YouTube не отдал английскую дорожку. Скачать временное видео и распознать речь локально через faster-whisper?");
           if (!approved) { showToast("Локальное распознавание отменено"); return; }
           showToast("Скачиваю временное видео и запускаю faster-whisper…");
-          captions = await window.appAPI.transcribeEnglishCaptions({ videoId: context.key, url: context.url });
+          captions = await window.appAPI.transcribeEnglishCaptions({ videoId: context.key, url: context.url, libraryId });
           if (expectedGeneration !== state.captionGeneration || context.youtubeId !== activeYoutubeId()) return;
         }
         state.captions = captions;
@@ -453,9 +510,9 @@
         if (expectedGeneration === state.captionGeneration) showToast(error.message);
       }
     })();
-    state.captionDownloads.set(context.key, job);
+    state.captionDownloads.set(jobKey, job);
     try { return await job; }
-    finally { if (state.captionDownloads.get(context.key) === job) state.captionDownloads.delete(context.key); }
+    finally { if (state.captionDownloads.get(jobKey) === job) state.captionDownloads.delete(jobKey); }
   }
   async function translateActiveCaptions() {
     const context = activeCaptionContext();
@@ -464,7 +521,7 @@
     const generation = state.captionGeneration;
     try {
       showToast("Перевожу субтитры через OpenRouter…");
-      const captions = await window.appAPI.translateCaptions(context.key);
+      const captions = await window.appAPI.translateCaptions(context.key, activeLibraryId());
       if (generation !== state.captionGeneration || context.youtubeId !== activeYoutubeId()) return;
       state.captions = captions;
       render();
@@ -520,7 +577,7 @@
     const video = { id: newId("video"), type: "video", name: "Новый урок", url: cleanUrl, createdAt: new Date().toISOString(), progress: { studied: 0, position: 0 } };
     state.library.root.children.push(video);
     await saveLibrary();
-    if (captionsToKeep.english.length || captionsToKeep.russian.length) await window.appAPI.saveCaptions(video.id, captionsToKeep);
+    if (captionsToKeep.english.length || captionsToKeep.russian.length) await window.appAPI.saveCaptions(video.id, captionsToKeep, activeLibraryId());
     saveCurrentPlayerPosition();
     state.selectedId = video.id;
     state.playerVideoId = video.id;
@@ -638,11 +695,200 @@
       if (button?.isConnected) { button.disabled = false; button.textContent = "Добавить"; }
     }
   }
-  async function renameSelected() { const node = selected(); if (node.id === "root") return; const name = prompt("Новое название:", node.name); if (!name?.trim()) return; node.name = name.trim(); await saveLibrary(); render(); }
+  function closeRenameNodeDialog() { document.querySelector("#renameNodeDialog")?.remove(); }
+  function renameSelected() {
+    const node = selected();
+    if (node.id === "root") return renameLibrary(activeLibraryId());
+    if (document.querySelector("#renameNodeDialog")) return;
+    const entity = node.type === "folder" ? "папку" : "ролик";
+    const dialog = document.createElement("div");
+    dialog.className = "dialog-backdrop";
+    dialog.id = "renameNodeDialog";
+    dialog.innerHTML = `<form class="dialog-card" aria-labelledby="renameNodeDialogTitle"><h2 id="renameNodeDialogTitle">Переименовать ${entity}</h2><label class="field">Название<input name="name" value="${escapeHtml(node.name)}" autocomplete="off" required /></label><div class="form-actions"><button class="subtle-button" type="button" data-dialog-cancel>Отмена</button><button class="primary" type="submit">Сохранить</button></div></form>`;
+    const form = dialog.querySelector("form");
+    const input = form.elements.name;
+    dialog.addEventListener("click", event => { if (event.target === dialog) closeRenameNodeDialog(); });
+    dialog.querySelector("[data-dialog-cancel]").addEventListener("click", closeRenameNodeDialog);
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const name = input.value.trim();
+      if (!name) return input.focus();
+      node.name = name;
+      try { await saveLibrary(); closeRenameNodeDialog(); render(); showToast("Название сохранено"); }
+      catch (error) { showToast(`Не удалось переименовать: ${error.message}`); }
+    });
+    document.body.append(dialog);
+    input.select();
+    input.focus();
+  }
   async function deleteSelected() { const node = selected(); if (node.id === "root") return; if (!confirm(`Удалить «${node.name}» из библиотеки?`)) return; const parent = findParent(node.id); parent.children = parent.children.filter(child => child.id !== node.id); state.selectedId = parent.id; if (state.playerVideoId === node.id) state.playerVideoId = null; await saveLibrary(); render(); }
+  async function switchLibrary(libraryId) {
+    if (libraryId === activeLibraryId()) return;
+    try {
+      saveCurrentPlayerPosition();
+      const result = await window.appAPI.selectLibrary(libraryId);
+      state.libraries = result.libraries;
+      state.library = result.library;
+      state.selectedId = "root";
+      state.playerVideoId = null;
+      state.playerUrl = "";
+      startCaptionSession();
+      state.activeTab = "library";
+      render();
+    } catch (error) { showToast(`Не удалось переключить библиотеку: ${error.message}`); }
+  }
+  function closeCreateLibraryDialog() { document.querySelector("#createLibraryDialog")?.remove(); }
+  function createLibrary() {
+    closeLibraryDialog();
+    if (document.querySelector("#createLibraryDialog")) return;
+    const dialog = document.createElement("div");
+    dialog.className = "dialog-backdrop";
+    dialog.id = "createLibraryDialog";
+    dialog.innerHTML = `<form class="dialog-card" aria-labelledby="createLibraryDialogTitle"><h2 id="createLibraryDialogTitle">Новая библиотека</h2><label class="field">Название библиотеки<input name="name" value="Новая библиотека" autocomplete="off" required /></label><p class="hint">Будет создана пустая библиотека и выбрана сразу после создания.</p><div class="form-actions"><button class="subtle-button" type="button" data-dialog-cancel>Отмена</button><button class="primary" type="submit">Создать</button></div></form>`;
+    const form = dialog.querySelector("form");
+    const input = form.elements.name;
+    dialog.addEventListener("click", event => { if (event.target === dialog) closeCreateLibraryDialog(); });
+    dialog.querySelector("[data-dialog-cancel]").addEventListener("click", closeCreateLibraryDialog);
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const name = input.value.trim();
+      if (!name) return input.focus();
+      try {
+        const result = await window.appAPI.createLibrary(name);
+        state.libraries = result.libraries;
+        state.library = result.library;
+        state.selectedId = "root";
+        state.playerVideoId = null;
+        startCaptionSession();
+        closeCreateLibraryDialog();
+        render();
+        showToast("Библиотека создана");
+      } catch (error) { showToast(`Не удалось создать библиотеку: ${error.message}`); }
+    });
+    document.body.append(dialog);
+    input.select();
+    input.focus();
+  }
+  function closeRenameLibraryDialog() { document.querySelector("#renameLibraryDialog")?.remove(); }
+  function renameLibrary(libraryId) {
+    const item = state.libraries.libraries.find(entry => entry.id === libraryId);
+    if (!item || document.querySelector("#renameLibraryDialog")) return;
+    closeLibraryDialog();
+    const dialog = document.createElement("div");
+    dialog.className = "dialog-backdrop";
+    dialog.id = "renameLibraryDialog";
+    dialog.innerHTML = `<form class="dialog-card" aria-labelledby="renameLibraryDialogTitle"><h2 id="renameLibraryDialogTitle">Переименовать библиотеку</h2><label class="field">Название библиотеки<input name="name" value="${escapeHtml(item.name)}" autocomplete="off" required /></label><div class="form-actions"><button class="subtle-button" type="button" data-dialog-cancel>Отмена</button><button class="primary" type="submit">Сохранить</button></div></form>`;
+    const form = dialog.querySelector("form");
+    const input = form.elements.name;
+    dialog.addEventListener("click", event => { if (event.target === dialog) closeRenameLibraryDialog(); });
+    dialog.querySelector("[data-dialog-cancel]").addEventListener("click", closeRenameLibraryDialog);
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const name = input.value.trim();
+      if (!name) return input.focus();
+      try {
+        state.libraries = await window.appAPI.renameLibrary(libraryId, name);
+        if (libraryId === activeLibraryId() && state.library?.root) state.library.root.name = name;
+        closeRenameLibraryDialog();
+        render();
+        showToast("Библиотека переименована");
+      } catch (error) { showToast(`Не удалось переименовать библиотеку: ${error.message}`); }
+    });
+    document.body.append(dialog);
+    input.select();
+    input.focus();
+  }
   async function exportLibrary() { try { const result = await window.appAPI.exportLibrary(); if (!result.canceled) showToast("Библиотека экспортирована"); } catch (error) { showToast(`Не удалось экспортировать библиотеку: ${error.message}`); } }
-  async function importLibrary() { if (!confirm("Импорт заменит текущую библиотеку. Перед этим будет создана резервная копия. Продолжить?")) return; try { const result = await window.appAPI.importLibrary(); if (result.canceled) return; state.library = result.library; state.selectedId = "root"; state.playerVideoId = null; render(); showToast("Библиотека импортирована"); } catch (error) { showToast(`Не удалось импортировать библиотеку: ${error.message}`); } }
-  async function restoreLatestLibraryBackup() { if (!confirm("Восстановить последнюю резервную копию библиотеки? Текущая библиотека будет заменена.")) return; try { const result = await window.appAPI.restoreLatestLibraryBackup(); if (!result.restored) return showToast("Резервных копий пока нет"); state.library = result.library; state.selectedId = "root"; state.playerVideoId = null; render(); showToast("Библиотека восстановлена из резервной копии"); } catch (error) { showToast(`Не удалось восстановить библиотеку: ${error.message}`); } }
+  async function importLibrary() {
+    try {
+      const result = await window.appAPI.importLibrary();
+      if (result.canceled) return;
+      state.libraries = result.libraries;
+      state.library = result.library;
+      state.selectedId = "root";
+      state.playerVideoId = null;
+      startCaptionSession();
+      render();
+      showToast("Библиотека импортирована");
+    } catch (error) { showToast(`Не удалось импортировать библиотеку: ${error.message}`); }
+  }
+  function closeLibraryDialog() { document.querySelector("#libraryDialog")?.remove(); }
+  function manageLibraries() {
+    closeLibraryDialog();
+    const dialog = document.createElement("div");
+    dialog.className = "dialog-backdrop";
+    dialog.id = "libraryDialog";
+    const rows = state.libraries.libraries.map(item => `<div class="library-manager-row"><div><strong>${escapeHtml(item.name)}</strong><small>${item.id === activeLibraryId() ? "Текущая библиотека" : ""}</small></div><div><button class="subtle-button" data-library-export="${item.id}">Экспорт</button><button class="subtle-button" data-library-rename="${item.id}">Переименовать</button><button class="subtle-button danger" data-library-delete="${item.id}" ${state.libraries.libraries.length === 1 ? "disabled" : ""}>Удалить</button></div></div>`).join("");
+    dialog.innerHTML = `<section class="dialog-card library-manager" aria-labelledby="libraryDialogTitle"><h2 id="libraryDialogTitle">Управление библиотеками</h2><div class="library-manager-list">${rows}</div><div class="form-actions"><button class="subtle-button" type="button" data-dialog-close>Закрыть</button><button class="primary" type="button" data-library-create>Новая библиотека</button></div></section>`;
+    dialog.addEventListener("click", event => { if (event.target === dialog) closeLibraryDialog(); });
+    dialog.querySelector("[data-dialog-close]").addEventListener("click", closeLibraryDialog);
+    dialog.querySelector("[data-library-create]").addEventListener("click", () => { closeLibraryDialog(); createLibrary(); });
+    dialog.querySelectorAll("[data-library-export]").forEach(button => button.addEventListener("click", async () => {
+      try { const result = await window.appAPI.exportLibrary(button.dataset.libraryExport); if (!result.canceled) showToast("Библиотека экспортирована"); } catch (error) { showToast(error.message); }
+    }));
+    dialog.querySelectorAll("[data-library-rename]").forEach(button => button.addEventListener("click", () => renameLibrary(button.dataset.libraryRename)));
+    dialog.querySelectorAll("[data-library-delete]").forEach(button => button.addEventListener("click", async () => {
+      const item = state.libraries.libraries.find(entry => entry.id === button.dataset.libraryDelete);
+      if (!item) return;
+      if (confirm(`Экспортировать библиотеку «${item.name}» перед удалением?`)) {
+        try { const exported = await window.appAPI.exportLibrary(item.id); if (exported.canceled) return; } catch (error) { return showToast(`Не удалось экспортировать библиотеку: ${error.message}`); }
+      }
+      if (!confirm(`Удалить библиотеку «${item.name}»? Перед удалением будет создана резервная копия, затем файлы будут перемещены в Корзину.`)) return;
+      try {
+        const result = await window.appAPI.deleteLibrary(item.id);
+        state.libraries = result.libraries;
+        state.library = result.library;
+        state.selectedId = "root";
+        state.playerVideoId = null;
+        startCaptionSession();
+        closeLibraryDialog();
+        render();
+        showToast("Библиотека перемещена в Корзину");
+      } catch (error) { showToast(`Не удалось удалить библиотеку: ${error.message}`); }
+    }));
+    document.body.append(dialog);
+  }
+  async function showBackups() {
+    try {
+      const backups = await window.appAPI.getLibraryBackups();
+      if (!backups.length) return showToast("Резервных копий пока нет");
+      closeLibraryDialog();
+      const dialog = document.createElement("div");
+      dialog.className = "dialog-backdrop";
+      dialog.id = "libraryDialog";
+      dialog.innerHTML = `<section class="dialog-card library-manager" aria-labelledby="libraryDialogTitle"><h2 id="libraryDialogTitle">Резервные копии</h2><div class="library-manager-list">${backups.map(item => `<div class="library-manager-row"><div><strong>${new Date(item.modifiedAt).toLocaleString("ru-RU")}</strong><small>Автоматическая копия</small></div><button class="subtle-button" data-backup="${escapeHtml(item.name)}">Восстановить</button></div>`).join("")}</div><div class="form-actions"><button class="subtle-button" type="button" data-dialog-close>Закрыть</button></div></section>`;
+      dialog.addEventListener("click", event => { if (event.target === dialog) closeLibraryDialog(); });
+      dialog.querySelector("[data-dialog-close]").addEventListener("click", closeLibraryDialog);
+      dialog.querySelectorAll("[data-backup]").forEach(button => button.addEventListener("click", async () => {
+        if (!confirm("Восстановить эту версию? Текущее состояние сначала будет сохранено в резервную копию.")) return;
+        try { const result = await window.appAPI.restoreLibraryBackup(button.dataset.backup); state.library = result.library; state.selectedId = "root"; state.playerVideoId = null; startCaptionSession(); closeLibraryDialog(); render(); showToast("Библиотека восстановлена"); } catch (error) { showToast(`Не удалось восстановить библиотеку: ${error.message}`); }
+      }));
+      document.body.append(dialog);
+    } catch (error) { showToast(`Не удалось получить резервные копии: ${error.message}`); }
+  }
+  function showLibraryMenu() {
+    closeContextMenu();
+    const trigger = document.querySelector("#librarySwitcher");
+    if (!trigger) return;
+    const box = trigger.getBoundingClientRect();
+    const menu = document.createElement("div");
+    menu.className = "context-menu library-menu";
+    menu.style.left = `${box.left}px`;
+    menu.style.top = `${box.bottom + 6}px`;
+    menu.innerHTML = `${state.libraries.libraries.map(item => `<button data-library-select="${item.id}" class="${item.id === activeLibraryId() ? "active" : ""}">${escapeHtml(item.name)}</button>`).join("")}<span class="menu-divider"></span><button data-library-menu="create">Создать библиотеку</button><button data-library-menu="import">Импортировать как новую</button><button data-library-menu="export">Экспортировать текущую</button><button data-library-menu="backups">Резервные копии…</button><button data-library-menu="manage">Управлять библиотеками…</button>`;
+    menu.addEventListener("click", event => {
+      const target = event.target.closest("button");
+      if (!target) return;
+      closeContextMenu();
+      if (target.dataset.librarySelect) switchLibrary(target.dataset.librarySelect);
+      if (target.dataset.libraryMenu === "create") createLibrary();
+      if (target.dataset.libraryMenu === "import") importLibrary();
+      if (target.dataset.libraryMenu === "export") exportLibrary();
+      if (target.dataset.libraryMenu === "backups") showBackups();
+      if (target.dataset.libraryMenu === "manage") manageLibraries();
+    });
+    document.body.append(menu);
+  }
   function closeContextMenu() { document.querySelector(".context-menu")?.remove(); }
   function showContextMenu(event, nodeId) {
     event.preventDefault(); closeContextMenu(); state.selectedId = nodeId;
@@ -660,9 +906,44 @@
 
   function bindEvents() {
     document.querySelectorAll("[data-tab]").forEach(button => button.addEventListener("click", () => { state.activeTab = button.dataset.tab; render(); }));
-    document.querySelector("#newFolder")?.addEventListener("click", createFolder); document.querySelector("#newVideo")?.addEventListener("click", createVideo); document.querySelector("#newVideoEmpty")?.addEventListener("click", createVideo); document.querySelector("#addVideoTop")?.addEventListener("click", createVideo); document.querySelector("#importLibrary")?.addEventListener("click", importLibrary); document.querySelector("#exportLibrary")?.addEventListener("click", exportLibrary); document.querySelector("#restoreLibrary")?.addEventListener("click", restoreLatestLibraryBackup);
+    document.querySelector("#newFolder")?.addEventListener("click", createFolder); document.querySelector("#newVideo")?.addEventListener("click", createVideo); document.querySelector("#newVideoEmpty")?.addEventListener("click", createVideo); document.querySelector("#addVideoTop")?.addEventListener("click", createVideo); document.querySelector("#librarySwitcher")?.addEventListener("click", event => { event.stopPropagation(); showLibraryMenu(); }); document.querySelector("#manageLibraries")?.addEventListener("click", manageLibraries);
+    document.querySelector("#createLibraryMain")?.addEventListener("click", createLibrary);
+    document.querySelector("#importLibraryMain")?.addEventListener("click", importLibrary);
+    document.querySelector("#manageLibrariesMain")?.addEventListener("click", manageLibraries);
+    document.querySelector("#showBackupsMain")?.addEventListener("click", showBackups);
+    document.querySelectorAll(".library-overview-row[data-library-select]").forEach(button => button.addEventListener("click", () => switchLibrary(button.dataset.librarySelect)));
     document.querySelectorAll("[data-toggle]").forEach(button => button.addEventListener("click", event => { event.stopPropagation(); const id = button.dataset.toggle; if (state.expanded.has(id)) state.expanded.delete(id); else state.expanded.add(id); render(); }));
-    document.querySelectorAll(".tree-row").forEach(row => { row.addEventListener("click", () => { state.selectedId = row.dataset.nodeId; render(); }); row.addEventListener("dblclick", () => { const node = findNode(row.dataset.nodeId); if (node.type === "video") openPlayer(node); }); row.addEventListener("contextmenu", event => showContextMenu(event, row.dataset.nodeId)); row.addEventListener("dragstart", event => event.dataTransfer.setData("text/plain", row.dataset.nodeId)); row.addEventListener("dragover", event => { const node = findNode(row.dataset.nodeId); if (node.type === "folder") { event.preventDefault(); row.classList.add("drag-over"); } }); row.addEventListener("dragleave", () => row.classList.remove("drag-over")); row.addEventListener("drop", async event => { event.preventDefault(); row.classList.remove("drag-over"); const target = findNode(row.dataset.nodeId); const moving = findNode(event.dataTransfer.getData("text/plain")); if (!moving || target.type !== "folder" || moving.id === target.id) return; const source = findParent(moving.id); if (source?.id === moving.id || moving.type === "folder") { let parent = target; while (parent) { if (parent.id === moving.id) return; parent = findParent(parent.id); } } source.children = source.children.filter(child => child.id !== moving.id); target.children ||= []; target.children.push(moving); state.expanded.add(target.id); await saveLibrary(); render(); }); });
+    document.querySelectorAll(".tree-row").forEach(row => {
+      row.addEventListener("click", () => { state.selectedId = row.dataset.nodeId; render(); });
+      row.addEventListener("dblclick", () => { const node = findNode(row.dataset.nodeId); if (node.type === "video") openPlayer(node); });
+      row.addEventListener("contextmenu", event => showContextMenu(event, row.dataset.nodeId));
+      row.addEventListener("dragstart", event => { state.draggedNodeId = row.dataset.nodeId; event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", state.draggedNodeId); requestAnimationFrame(() => row.classList.add("dragging")); });
+      row.addEventListener("dragend", () => { state.draggedNodeId = ""; clearDropIndicators(); document.querySelectorAll(".tree-row.dragging").forEach(item => item.classList.remove("dragging")); });
+      row.addEventListener("dragover", event => {
+        const target = findNode(row.dataset.nodeId);
+        const moving = findNode(state.draggedNodeId || event.dataTransfer.getData("text/plain"));
+        const placement = dropPlacement(row, target, event);
+        const destination = placement === "inside" ? target : findParent(target.id);
+        if (!canMoveNode(moving, destination)) return;
+        event.preventDefault(); event.dataTransfer.dropEffect = "move"; clearDropIndicators();
+        row.classList.add(placement === "inside" ? "drag-over" : `drop-${placement}`);
+      });
+      row.addEventListener("dragleave", event => { if (!row.contains(event.relatedTarget)) clearDropIndicators(); });
+      row.addEventListener("drop", async event => {
+        event.preventDefault(); clearDropIndicators();
+        const target = findNode(row.dataset.nodeId);
+        const moving = findNode(state.draggedNodeId || event.dataTransfer.getData("text/plain"));
+        const placement = dropPlacement(row, target, event);
+        const destination = placement === "inside" ? target : findParent(target.id);
+        if (!canMoveNode(moving, destination)) return;
+        const targetIndex = destination.children.findIndex(child => child.id === target.id);
+        const index = placement === "inside" ? destination.children.length : targetIndex + (placement === "after" ? 1 : 0);
+        if (!moveNode(moving, destination, index)) return;
+        if (placement === "inside") state.expanded.add(destination.id);
+        state.selectedId = moving.id;
+        await saveLibrary(); render();
+      });
+    });
     document.querySelectorAll("[data-action]").forEach(button => button.addEventListener("click", () => { const action = button.dataset.action; if (action === "rename") renameSelected(); if (action === "delete") deleteSelected(); if (action === "add-video") createVideo(); }));
     document.querySelector("#folderForm")?.addEventListener("submit", async event => { event.preventDefault(); const folder = selected(); folder.playlistUrl = new FormData(event.currentTarget).get("playlistUrl").trim(); await saveLibrary(); showToast("Ссылка на плейлист сохранена"); render(); });
     document.querySelector("#openPlaylist")?.addEventListener("click", async () => { const url = document.querySelector("#folderForm [name=playlistUrl]").value.trim(); if (!url) return showToast("Вставьте ссылку на плейлист YouTube"); try { await window.appAPI.openPlaylist(url); } catch (error) { showToast(error.message); } });
@@ -720,5 +1001,5 @@
   window.addEventListener("beforeunload", saveCurrentPlayerPosition);
   document.addEventListener("click", event => { if (!event.target.closest(".context-menu")) closeContextMenu(); });
   document.addEventListener("keydown", event => { if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return; if (state.activeTab !== "player") return; if (event.code === "Space") { event.preventDefault(); playerCommand("play"); } if (event.key === "ArrowLeft") playerCommand("back"); if (event.key === "ArrowRight") playerCommand("forward"); if (event.key === "[") playerCommand("rate", .75); if (event.key === "]") playerCommand("rate", 1.25); if (event.key.toLowerCase() === "r") playerCommand("repeat"); });
-  Promise.all([window.appAPI.getInfo(), window.appAPI.getLibrary(), window.appAPI.getSettings()]).then(async ([info, library, settings]) => { state.info = info; state.library = library; state.settings = settings; await offerDefaultLibrary(); render(); }).catch(error => { app.textContent = `Не удалось загрузить приложение: ${error.message}`; });
+  Promise.all([window.appAPI.getInfo(), window.appAPI.getLibrary(), window.appAPI.getLibraries(), window.appAPI.getSettings()]).then(async ([info, library, libraries, settings]) => { state.info = info; state.library = library; state.libraries = libraries; state.settings = settings; await offerDefaultLibrary(); render(); }).catch(error => { app.textContent = `Не удалось загрузить приложение: ${error.message}`; });
 })();

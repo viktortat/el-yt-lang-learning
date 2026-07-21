@@ -15,6 +15,7 @@ const APP_TITLE = `${APP_NAME} v${APP_VERSION}`;
 
 let mainWindow;
 let library;
+let libraries;
 let settings;
 let rendererServer;
 const captionJobs = new Map();
@@ -31,11 +32,14 @@ function dataDirectory() {
   return app.isPackaged ? app.getPath("userData") : __dirname;
 }
 
-function libraryPath() { return path.join(dataDirectory(), "library.json"); }
+function librariesPath() { return path.join(dataDirectory(), "libraries.json"); }
+function librariesDirectory() { return path.join(dataDirectory(), "libraries"); }
+function libraryDirectory(libraryId = libraries?.activeId) { return path.join(librariesDirectory(), libraryId); }
+function libraryPath(libraryId = libraries?.activeId) { return path.join(libraryDirectory(libraryId), "library.json"); }
 function defaultLibraryPath() { return path.join(__dirname, "default.ytll-library.json"); }
 function settingsPath() { return path.join(dataDirectory(), "settings.json"); }
-function captionsPath(videoId) { return path.join(dataDirectory(), "captions", `${videoId}.json`); }
-function backupsDirectory() { return path.join(dataDirectory(), "library-backups"); }
+function captionsPath(videoId, libraryId = libraries?.activeId) { return path.join(libraryDirectory(libraryId), "captions", `${videoId}.json`); }
+function backupsDirectory(libraryId = libraries?.activeId) { return path.join(libraryDirectory(libraryId), "backups"); }
 function diagnosticPath() { return path.join(app.getPath("userData"), "renderer-debug.log"); }
 function logDiagnostic(message) { appendFile(diagnosticPath(), `${new Date().toISOString()} ${message}\n`).catch(() => {}); }
 
@@ -58,6 +62,20 @@ function defaultLibrary() {
     version: 1,
     root: { id: "root", type: "folder", name: "Моя библиотека", children: [] }
   };
+}
+
+function defaultLibraries() {
+  const id = "library-default";
+  return { version: 1, activeId: id, libraries: [{ id, name: "Моя библиотека", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }] };
+}
+
+function normalizeLibraries(value) {
+  if (!value || !Array.isArray(value.libraries) || !value.libraries.length) return defaultLibraries();
+  const items = value.libraries.filter(item => item && /^[A-Za-z0-9_-]+$/.test(item.id) && typeof item.name === "string" && item.name.trim()).map(item => ({
+    id: item.id, name: item.name.trim(), createdAt: item.createdAt || new Date().toISOString(), updatedAt: item.updatedAt || item.createdAt || new Date().toISOString()
+  }));
+  if (!items.length) return defaultLibraries();
+  return { version: 1, activeId: items.some(item => item.id === value.activeId) ? value.activeId : items[0].id, libraries: items };
 }
 
 function defaultSettings() {
@@ -165,7 +183,7 @@ async function oldPackagedDataDirectories() {
 }
 
 async function migratePackagedDataToUserData() {
-  if (!app.isPackaged || await pathExists(libraryPath())) return;
+  if (!app.isPackaged || await pathExists(librariesPath()) || await pathExists(path.join(dataDirectory(), "library.json"))) return;
 
   const candidates = [];
   for (const directory of await oldPackagedDataDirectories()) {
@@ -179,32 +197,54 @@ async function migratePackagedDataToUserData() {
   const sourceDirectory = candidates[0]?.directory;
   if (!sourceDirectory) return;
 
-  await copyIfExists(path.join(sourceDirectory, "library.json"), libraryPath());
+  await copyIfExists(path.join(sourceDirectory, "library.json"), path.join(dataDirectory(), "library.json"));
   await copyIfExists(path.join(sourceDirectory, "settings.json"), settingsPath());
   await copyIfExists(path.join(sourceDirectory, "captions"), path.join(dataDirectory(), "captions"));
-  await copyIfExists(path.join(sourceDirectory, "library-backups"), backupsDirectory());
+  await copyIfExists(path.join(sourceDirectory, "library-backups"), path.join(dataDirectory(), "library-backups"));
   logDiagnostic(`migrated packaged data from ${sourceDirectory}`);
+}
+
+async function moveIfExists(source, target) {
+  if (!await pathExists(source) || await pathExists(target)) return false;
+  await mkdir(path.dirname(target), { recursive: true });
+  await rename(source, target);
+  return true;
+}
+
+async function migrateLegacyLibrary() {
+  if (await pathExists(librariesPath())) return;
+  const catalog = defaultLibraries();
+  const targetDirectory = libraryDirectory(catalog.activeId);
+  await mkdir(targetDirectory, { recursive: true });
+  await moveIfExists(path.join(dataDirectory(), "library.json"), path.join(targetDirectory, "library.json"));
+  await moveIfExists(path.join(dataDirectory(), "captions"), path.join(targetDirectory, "captions"));
+  await moveIfExists(path.join(dataDirectory(), "library-backups"), path.join(targetDirectory, "backups"));
+  await writeJson(librariesPath(), catalog);
 }
 
 async function loadData() {
   await migratePackagedDataToUserData();
+  await migrateLegacyLibrary();
+  libraries = normalizeLibraries(await readJson(librariesPath(), defaultLibraries));
+  await writeJson(librariesPath(), libraries);
   library = normalizeLibrary(await readJson(libraryPath(), defaultLibrary));
   settings = normalizeSettings(await readJson(settingsPath(), defaultSettings));
 }
 
-function defaultCaptions() { return { version: 1, english: [], russian: [], studiedIds: [] }; }
-async function loadCaptions(videoId) {
-  const captions = await readJson(captionsPath(videoId), defaultCaptions);
+function defaultCaptions() { return { version: 1, english: [], russian: [], studiedIds: [], translatedAutoCaptions: null }; }
+async function loadCaptions(videoId, libraryId = libraries.activeId) {
+  const captions = await readJson(captionsPath(videoId, libraryId), defaultCaptions);
+  if (captions.translatedAutoCaptions !== null && typeof captions.translatedAutoCaptions !== "object") captions.translatedAutoCaptions = null;
   if (captions.english?.length && !captions.russian?.length) {
     const normalized = normalizeCaptionSegments(captions.english);
     if (normalized.length !== captions.english.length) {
       captions.english = normalized;
-      await writeJson(captionsPath(videoId), captions);
+      await writeJson(captionsPath(videoId, libraryId), captions);
     }
   }
   return captions;
 }
-async function saveCaptions(videoId, captions) { await writeJson(captionsPath(videoId), captions); return captions; }
+async function saveCaptions(videoId, captions, libraryId = libraries.activeId) { await writeJson(captionsPath(videoId, libraryId), captions); return captions; }
 
 function videoIds(sourceLibrary) {
   const ids = new Set();
@@ -222,9 +262,9 @@ function validateLibraryTree(node) {
   return node.type !== "folder" || (Array.isArray(node.children) && node.children.every(validateLibraryTree));
 }
 
-async function libraryBundle(sourceLibrary = library) {
+async function libraryBundle(sourceLibrary = library, libraryId = libraries.activeId) {
   const captions = {};
-  for (const videoId of videoIds(sourceLibrary)) captions[videoId] = await loadCaptions(videoId);
+  for (const videoId of videoIds(sourceLibrary)) captions[videoId] = await loadCaptions(videoId, libraryId);
   return { format: "yt-lang-learning-library", version: 1, library: sourceLibrary, captions };
 }
 
@@ -236,7 +276,7 @@ function normalizeLibraryBundle(value) {
   const captions = {};
   for (const videoId of videoIds(nextLibrary)) {
     const item = value.captions?.[videoId] || defaultCaptions();
-    captions[videoId] = { version: 1, english: Array.isArray(item.english) ? item.english : [], russian: Array.isArray(item.russian) ? item.russian : [], studiedIds: Array.isArray(item.studiedIds) ? item.studiedIds : [] };
+    captions[videoId] = { version: 1, english: Array.isArray(item.english) ? item.english : [], russian: Array.isArray(item.russian) ? item.russian : [], studiedIds: Array.isArray(item.studiedIds) ? item.studiedIds : [], translatedAutoCaptions: item.translatedAutoCaptions && typeof item.translatedAutoCaptions === "object" ? item.translatedAutoCaptions : null };
   }
   return { library: nextLibrary, captions };
 }
@@ -245,23 +285,24 @@ function isLibraryEmpty(sourceLibrary = library) {
   return !Array.isArray(sourceLibrary?.root?.children) || sourceLibrary.root.children.length === 0;
 }
 
-async function saveBackup() {
-  await mkdir(backupsDirectory(), { recursive: true });
+async function saveBackup(libraryId = libraries.activeId, sourceLibrary = library) {
+  await mkdir(backupsDirectory(libraryId), { recursive: true });
   const fileName = `library-${new Date().toISOString().replace(/[:.]/g, "-")}.ytll-library.json`;
-  await writeJson(path.join(backupsDirectory(), fileName), await libraryBundle());
-  const backups = (await readdir(backupsDirectory())).filter(name => name.endsWith(".ytll-library.json")).sort().reverse();
-  for (const outdated of backups.slice(3)) await rm(path.join(backupsDirectory(), outdated));
+  await writeJson(path.join(backupsDirectory(libraryId), fileName), await libraryBundle(sourceLibrary, libraryId));
+  const backups = (await readdir(backupsDirectory(libraryId))).filter(name => name.endsWith(".ytll-library.json")).sort().reverse();
+  for (const outdated of backups.slice(3)) await rm(path.join(backupsDirectory(libraryId), outdated));
 }
 
-async function replaceLibraryFromBundle(bundle) {
+async function replaceLibraryFromBundle(bundle, libraryId = libraries.activeId) {
   const next = normalizeLibraryBundle(bundle);
-  for (const [videoId, captions] of Object.entries(next.captions)) await saveCaptions(videoId, captions);
-  const oldVideoIds = videoIds(library);
+  for (const [videoId, captions] of Object.entries(next.captions)) await saveCaptions(videoId, captions, libraryId);
+  const current = libraryId === libraries.activeId ? library : normalizeLibrary(await readJson(libraryPath(libraryId), defaultLibrary));
+  const oldVideoIds = videoIds(current);
   const nextVideoIds = videoIds(next.library);
-  await writeJson(libraryPath(), next.library);
-  library = next.library;
-  await Promise.all([...oldVideoIds].filter(videoId => !nextVideoIds.has(videoId)).map(videoId => rm(captionsPath(videoId), { force: true })));
-  return library;
+  await writeJson(libraryPath(libraryId), next.library);
+  if (libraryId === libraries.activeId) library = next.library;
+  await Promise.all([...oldVideoIds].filter(videoId => !nextVideoIds.has(videoId)).map(videoId => rm(captionsPath(videoId, libraryId), { force: true })));
+  return next.library;
 }
 
 function run(command, args, cwd, onOutput = () => {}) {
@@ -313,6 +354,32 @@ async function runYtDlpCapture(args, cwd) {
   }
 }
 
+function isEnglishLanguage(language) {
+  return /^en(?:[-_]|$)/i.test(String(language || ""));
+}
+
+async function englishCaptionTrackInfo({ url }) {
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "ytll-caption-info-"));
+  try {
+    const output = await runYtDlpCapture([
+      "--skip-download", "--dump-single-json", "--no-warnings", "--ignore-no-formats-error", url
+    ], temporaryDirectory);
+    const metadata = JSON.parse(output);
+    const manualTracks = Object.keys(metadata.subtitles || {});
+    const automaticTracks = Object.keys(metadata.automatic_captions || {});
+    const sourceLanguage = String(metadata.language || "").trim().toLowerCase();
+    const hasEnglishManualTrack = manualTracks.some(isEnglishLanguage);
+    return {
+      hasEnglishManualTrack,
+      hasAutomaticTrack: automaticTracks.length > 0,
+      sourceLanguage: sourceLanguage || null,
+      needsTranslatedAutomaticTrack: !hasEnglishManualTrack && automaticTracks.length > 0 && !!sourceLanguage && !isEnglishLanguage(sourceLanguage)
+    };
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
 async function playlistVideos(url) {
   const playlistUrl = normalizeYoutubePlaylistUrl(url);
   const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "ytll-playlist-"));
@@ -357,7 +424,7 @@ function parseVtt(content) {
   return normalizeCaptionSegments(segments);
 }
 
-async function downloadEnglishCaptions({ videoId, url }) {
+async function downloadEnglishCaptions({ videoId, url, libraryId = libraries.activeId, allowTranslatedAutomaticTrack = true }) {
   const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "ytll-captions-"));
   try {
     const output = path.join(temporaryDirectory, "caption.%(ext)s");
@@ -370,29 +437,35 @@ async function downloadEnglishCaptions({ videoId, url }) {
     } catch {}
     let files = await readdir(temporaryDirectory);
     if (!hasVtt(files)) {
+      if (!allowTranslatedAutomaticTrack) return { status: "translated-auto-track-not-approved" };
       // yt-dlp возвращает код 0 даже когда ручной дорожки нет, поэтому
       // fallback определяется по фактически созданному VTT-файлу.
-      await runYtDlp([
-        "--skip-download", "--write-auto-subs", "--sub-langs", "en-orig,en", "--sub-format", "vtt", "--convert-subs", "vtt",
-        "-o", output, url
-      ], temporaryDirectory);
+      try {
+        await runYtDlp([
+          "--skip-download", "--write-auto-subs", "--sub-langs", "en-orig,en", "--sub-format", "vtt", "--convert-subs", "vtt",
+          "-o", output, url
+        ], temporaryDirectory);
+      } catch (error) {
+        if (/HTTP Error 429/i.test(error.message)) return { status: "rate-limited" };
+        throw error;
+      }
       files = await readdir(temporaryDirectory);
     }
     const vtt = chooseEnglishVtt(files);
     if (!vtt) return { status: "missing-track" };
     const english = parseVtt(await readFile(path.join(temporaryDirectory, vtt), "utf8"));
     if (!english.length) throw new Error("В найденной дорожке нет реплик.");
-    const captions = await loadCaptions(videoId);
+    const captions = await loadCaptions(videoId, libraryId);
     captions.english = english;
     captions.russian = [];
     captions.studiedIds ||= [];
-    return { status: "ok", captions: await saveCaptions(videoId, captions) };
+    return { status: "ok", captions: await saveCaptions(videoId, captions, libraryId) };
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
 }
 
-async function transcribeEnglishCaptions({ videoId, url }, onProgress = () => {}) {
+async function transcribeEnglishCaptions({ videoId, url, libraryId = libraries.activeId }, onProgress = () => {}) {
   const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "ytll-whisper-"));
   try {
     const sourceTemplate = path.join(temporaryDirectory, "source.%(ext)s");
@@ -422,11 +495,11 @@ async function transcribeEnglishCaptions({ videoId, url }, onProgress = () => {}
     const payload = JSON.parse(await readFile(transcriptPath, "utf8"));
     const english = captionsFromTranscript(payload);
     if (!english.length) throw new Error("faster-whisper не распознал английскую речь в видео.");
-    const captions = await loadCaptions(videoId);
+    const captions = await loadCaptions(videoId, libraryId);
     captions.english = english;
     captions.russian = [];
     captions.studiedIds ||= [];
-    return saveCaptions(videoId, captions);
+    return saveCaptions(videoId, captions, libraryId);
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
@@ -439,10 +512,10 @@ function oncePerCaptionJob(key, factory) {
   return job;
 }
 
-async function translateCaptions(videoId, onProgress = () => {}) {
+async function translateCaptions(videoId, libraryId = libraries.activeId, onProgress = () => {}) {
   if (!settings.translation.encryptedApiKey) throw new Error("В настройках не указан ключ OpenRouter.");
   const apiKey = safeStorage.decryptString(Buffer.from(settings.translation.encryptedApiKey, "base64"));
-  const captions = await loadCaptions(videoId);
+  const captions = await loadCaptions(videoId, libraryId);
   if (!captions.english.length) throw new Error("Сначала загрузите английские субтитры.");
   captions.english = normalizeCaptionSegments(captions.english);
   const russian = [];
@@ -493,7 +566,7 @@ async function translateCaptions(videoId, onProgress = () => {}) {
       russian.push({ ...item, text: translatedById.get(item.id) });
     }
     captions.russian = [...russian];
-    await saveCaptions(videoId, captions);
+    await saveCaptions(videoId, captions, libraryId);
     onProgress({ videoId, completed: russian.length, total: captions.english.length });
   }
   return captions;
@@ -624,9 +697,56 @@ if (require("electron-squirrel-startup")) {
       return { url };
     });
     ipcMain.handle("library:get", () => library);
+    ipcMain.handle("libraries:get", () => libraries);
+    ipcMain.handle("libraries:select", async (_event, libraryId) => {
+      if (!libraries.libraries.some(item => item.id === libraryId)) throw new Error("Библиотека не найдена");
+      libraries.activeId = libraryId;
+      await writeJson(librariesPath(), libraries);
+      library = normalizeLibrary(await readJson(libraryPath(libraryId), defaultLibrary));
+      return { libraries, library };
+    });
+    ipcMain.handle("libraries:create", async (_event, name) => {
+      const trimmed = String(name || "").trim();
+      if (!trimmed) throw new Error("Укажите название библиотеки");
+      const item = { id: newId("library"), name: trimmed, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      libraries.libraries.push(item);
+      libraries.activeId = item.id;
+      library = defaultLibrary();
+      library.root.name = trimmed;
+      await writeJson(libraryPath(item.id), library);
+      await writeJson(librariesPath(), libraries);
+      return { libraries, library };
+    });
+    ipcMain.handle("libraries:rename", async (_event, libraryId, name) => {
+      const item = libraries.libraries.find(entry => entry.id === libraryId);
+      const trimmed = String(name || "").trim();
+      if (!item || !trimmed) throw new Error("Укажите название библиотеки");
+      item.name = trimmed;
+      item.updatedAt = new Date().toISOString();
+      if (libraryId === libraries.activeId) { library.root.name = trimmed; await writeJson(libraryPath(), library); }
+      await writeJson(librariesPath(), libraries);
+      return libraries;
+    });
+    ipcMain.handle("libraries:delete", async (_event, libraryId) => {
+      if (libraries.libraries.length < 2) throw new Error("Нельзя удалить последнюю библиотеку");
+      const item = libraries.libraries.find(entry => entry.id === libraryId);
+      if (!item) throw new Error("Библиотека не найдена");
+      const removedLibrary = normalizeLibrary(await readJson(libraryPath(libraryId), defaultLibrary));
+      await saveBackup(libraryId, removedLibrary);
+      await shell.trashItem(libraryDirectory(libraryId));
+      libraries.libraries = libraries.libraries.filter(entry => entry.id !== libraryId);
+      if (libraries.activeId === libraryId) {
+        libraries.activeId = libraries.libraries[0].id;
+        library = normalizeLibrary(await readJson(libraryPath(), defaultLibrary));
+      }
+      await writeJson(librariesPath(), libraries);
+      return { libraries, library };
+    });
     ipcMain.handle("library:save", async (_event, nextLibrary) => {
       library = normalizeLibrary(nextLibrary);
       await writeJson(libraryPath(), library);
+      const item = libraries.libraries.find(entry => entry.id === libraries.activeId);
+      if (item) { item.updatedAt = new Date().toISOString(); await writeJson(librariesPath(), libraries); }
       return library;
     });
     ipcMain.handle("library:handle-empty-default", async (_event, shouldPopulate) => {
@@ -637,41 +757,58 @@ if (require("electron-squirrel-startup")) {
       const bundle = JSON.parse(await readFile(defaultLibraryPath(), "utf8"));
       return { handled: true, library: await replaceLibraryFromBundle(bundle) };
     });
-    ipcMain.handle("library:export", async () => {
-      const result = await dialog.showSaveDialog(mainWindow, { title: "Экспорт библиотеки", defaultPath: "Моя библиотека.ytll-library.json", filters: [{ name: "Библиотека YT Lang Learning", extensions: ["json"] }] });
+    ipcMain.handle("library:export", async (_event, libraryId = libraries.activeId) => {
+      const item = libraries.libraries.find(entry => entry.id === libraryId);
+      if (!item) throw new Error("Библиотека не найдена");
+      const result = await dialog.showSaveDialog(mainWindow, { title: "Экспорт библиотеки", defaultPath: `${item?.name || "Библиотека"}.ytll-library.json`, filters: [{ name: "Библиотека YT Lang Learning", extensions: ["json"] }] });
       if (result.canceled || !result.filePath) return { canceled: true };
-      await writeJson(result.filePath, await libraryBundle());
+      const sourceLibrary = libraryId === libraries.activeId ? library : normalizeLibrary(await readJson(libraryPath(libraryId), defaultLibrary));
+      await writeJson(result.filePath, await libraryBundle(sourceLibrary, libraryId));
       return { filePath: result.filePath };
     });
     ipcMain.handle("library:import", async () => {
-      const result = await dialog.showOpenDialog(mainWindow, { title: "Импорт библиотеки", properties: ["openFile"], filters: [{ name: "Библиотека YT Lang Learning", extensions: ["json"] }] });
+      const result = await dialog.showOpenDialog(mainWindow, { title: "Импортировать как новую библиотеку", properties: ["openFile"], filters: [{ name: "Библиотека YT Lang Learning", extensions: ["json"] }] });
       if (result.canceled || !result.filePaths[0]) return { canceled: true };
       const imported = JSON.parse(await readFile(result.filePaths[0], "utf8"));
-      normalizeLibraryBundle(imported);
-      await saveBackup();
-      return { library: await replaceLibraryFromBundle(imported) };
+      const bundle = normalizeLibraryBundle(imported);
+      const item = { id: newId("library"), name: bundle.library.root.name || "Импортированная библиотека", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      libraries.libraries.push(item);
+      libraries.activeId = item.id;
+      library = defaultLibrary();
+      await replaceLibraryFromBundle(imported, item.id);
+      library = bundle.library;
+      await writeJson(librariesPath(), libraries);
+      return { libraries, library };
     });
-    ipcMain.handle("library:restore-latest-backup", async () => {
+    ipcMain.handle("library:backups", async () => {
       let backups;
       try { backups = (await readdir(backupsDirectory())).filter(name => name.endsWith(".ytll-library.json")).sort().reverse(); }
       catch (error) { if (error.code === "ENOENT") backups = []; else throw error; }
-      if (!backups.length) return { restored: false };
-      const backup = JSON.parse(await readFile(path.join(backupsDirectory(), backups[0]), "utf8"));
-      return { restored: true, library: await replaceLibraryFromBundle(backup) };
+      return Promise.all(backups.map(async name => ({ name, modifiedAt: (await stat(path.join(backupsDirectory(), name))).mtime.toISOString() })));
     });
-    ipcMain.handle("captions:get", (_event, videoId) => loadCaptions(videoId));
-    ipcMain.handle("captions:save", (_event, videoId, captions) => saveCaptions(videoId, {
+    ipcMain.handle("library:restore-backup", async (_event, name) => {
+      if (!/^[A-Za-z0-9_.-]+\.ytll-library\.json$/.test(name || "")) throw new Error("Некорректная резервная копия");
+      const backupPath = path.join(backupsDirectory(), name);
+      if (!await pathExists(backupPath)) throw new Error("Резервная копия не найдена");
+      await saveBackup();
+      const backup = JSON.parse(await readFile(backupPath, "utf8"));
+      return { library: await replaceLibraryFromBundle(backup) };
+    });
+    ipcMain.handle("captions:get", (_event, videoId, libraryId) => loadCaptions(videoId, libraryId));
+    ipcMain.handle("captions:save", (_event, videoId, captions, libraryId) => saveCaptions(videoId, {
       version: 1,
       english: Array.isArray(captions?.english) ? captions.english : [],
       russian: Array.isArray(captions?.russian) ? captions.russian : [],
       studiedIds: Array.isArray(captions?.studiedIds) ? captions.studiedIds : [],
-    }));
-    ipcMain.handle("captions:download-english", (_event, payload) => oncePerCaptionJob(`youtube:${payload.videoId}`, () => downloadEnglishCaptions(payload)));
+      translatedAutoCaptions: captions?.translatedAutoCaptions && typeof captions.translatedAutoCaptions === "object" ? captions.translatedAutoCaptions : null,
+    }, libraryId));
+    ipcMain.handle("captions:english-track-info", (_event, payload) => englishCaptionTrackInfo(payload));
+    ipcMain.handle("captions:download-english", (_event, payload) => oncePerCaptionJob(`youtube:${payload.libraryId}:${payload.videoId}`, () => downloadEnglishCaptions(payload)));
     ipcMain.handle("captions:transcribe-english", (event, payload) => oncePerCaptionJob(
-      `whisper:${payload.videoId}`,
+      `whisper:${payload.libraryId}:${payload.videoId}`,
       () => transcribeEnglishCaptions(payload, progress => event.sender.send("captions:transcription-progress", progress))
     ));
-    ipcMain.handle("captions:translate", (event, videoId) => oncePerCaptionJob(`translate:${videoId}`, () => translateCaptions(videoId, progress => event.sender.send("captions:translation-progress", progress))));
+    ipcMain.handle("captions:translate", (event, videoId, libraryId) => oncePerCaptionJob(`translate:${libraryId}:${videoId}`, () => translateCaptions(videoId, libraryId, progress => event.sender.send("captions:translation-progress", progress))));
     ipcMain.handle("settings:get", () => publicSettings());
     ipcMain.handle("settings:save", async (_event, payload) => {
       settings = storeSettings(payload.settings, payload.apiKey);

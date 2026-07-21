@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "activeId": "library-mru8yegi-ykoqn",
+  "libraries": [
+    {
+      "id": "library-default",
+      "name": "Главная",
+      "createdAt": "2026-07-21T05:50:02.222Z",
+      "updatedAt": "2026-07-21T06:10:35.512Z"
+    },
+    {
+      "id": "library-mru8yegi-ykoqn",
+      "name": "Румынский",
+      "createdAt": "2026-07-21T06:02:40.434Z",
+      "updatedAt": "2026-07-21T06:31:40.996Z"
+    },
+    {
+      "id": "library-mru8yzei-tjtbs",
+      "name": "Польский",
+      "createdAt": "2026-07-21T06:03:07.578Z",
+      "updatedAt": "2026-07-21T06:03:07.578Z"
+    }
+  ]
+}

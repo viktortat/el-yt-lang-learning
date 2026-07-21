@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "root": {
+    "id": "root",
+    "type": "folder",
+    "name": "Румынский",
+    "children": [
+      {
+        "id": "folder-mru9b5ip-rws7q",
+        "type": "folder",
+        "name": "Kanal D Romania",
+        "children": [
+          {
+            "id": "video-mru9c41w-4xrn6",
+            "type": "video",
+            "name": "Follow us!-Dr. Vlad Postelnicu, despre problemele ORL ale verii: alergii, otite si aerul conditionat",
+            "url": "https://www.youtube.com/watch?v=hgGz6s1zdqg",
+            "createdAt": "2026-07-21T06:13:20.132Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          },
+          {
+            "id": "video-mru9zi00-79o98",
+            "type": "video",
+            "name": "Casa Iubirii - Diana, \"la cutite\" cu Daniela: ,,M-a injurat...\" Carolina intervine: ,,Tu n-ai...\"",
+            "url": "https://www.youtube.com/watch?v=QDH5i9NiQlQ",
+            "createdAt": "2026-07-21T06:31:31.296Z",
+            "progress": {
+              "studied": 0,
+              "position": 0
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
