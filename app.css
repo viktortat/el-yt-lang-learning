@@ -88,6 +88,18 @@ body, button, input, select, textarea, .dialog-backdrop, .dialog-backdrop * { fo
 .language-tags-empty { color:var(--muted); font-size:11px; }
 .settings-row textarea { width:100%; min-height:96px; resize:vertical; border:1px solid var(--line); border-radius:7px; background:var(--panel); color:var(--text); padding:10px 11px; outline:none; }
 .settings-row textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent); }
+/* Обновления */
+.version-label { cursor:pointer; position:relative; }
+.version-label:hover { color:var(--accent); }
+.version-label.has-update { color:var(--accent); padding-right:20px; }
+.update-badge { position:absolute; top:-6px; right:-4px; display:grid; place-items:center; width:17px; height:17px; border-radius:999px; background:var(--accent); color:#073b2c; font:800 10px/1 "DM Mono",monospace; box-shadow:0 0 10px color-mix(in srgb,var(--accent) 50%,transparent); }
+.update-dialog { width:min(100%,560px); max-height:80vh; }
+.update-dialog h2 { color:var(--accent); }
+.update-body { overflow:auto; max-height:40vh; color:var(--muted); line-height:1.6; font-size:12px; }
+.update-progress { display:flex; align-items:center; gap:9px; }
+.update-progress-bar { height:7px; border-radius:999px; background:var(--accent); transition:width .2s ease; flex:1; }
+.update-progress span { font:10px "DM Mono"; color:var(--accent); }
+
 
 /* Единая шкала интерфейсной типографики. */
 :root { --font-interface:Manrope, sans-serif; }

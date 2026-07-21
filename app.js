@@ -12,6 +12,10 @@
   state.activeCaptionId = "";
   state.playerGeneration = 0;
   state.captionGeneration = 0;
+  state.updateAvailable = null;
+  state.updateDownloading = false;
+  state.updateProgress = 0;
+  state.updateDownloaded = false;
   state.captionDownloads = new Map();
   state.draggedNodeId = "";
   state.positionStore = window.PlaybackPosition.createStore(localStorage);
@@ -208,7 +212,7 @@
 
   function shell(content) {
     const info = state.info || {};
-    return `<section class="shell"><header class="topbar"><div class="brand"><span class="brand-mark">YT</span><span>LANG LEARNING</span></div><nav class="tabs" aria-label="Разделы"><button class="tab ${state.activeTab === "library" ? "active" : ""}" data-tab="library">БИБЛИОТЕКА</button><button class="tab ${state.activeTab === "player" ? "active" : ""}" data-tab="player">ПЛЕЕР</button></nav><div class="top-actions"><button class="icon-button" id="addVideoTop" title="Добавить ролик" aria-label="Добавить ролик">${icon("circlePlus")}</button><button class="icon-button" data-tab="settings" title="Настройки" aria-label="Настройки">⚙</button></div></header>${content}<footer class="statusbar"><b>v${escapeHtml(info.version || "?")}</b> · переносная библиотека · ${escapeHtml(info.dataDirectory || "")}</footer></section>`;
+    return `<section class="shell"><header class="topbar"><div class="brand"><span class="brand-mark">YT</span><span>LANG LEARNING</span></div><nav class="tabs" aria-label="Разделы"><button class="tab ${state.activeTab === "library" ? "active" : ""}" data-tab="library">БИБЛИОТЕКА</button><button class="tab ${state.activeTab === "player" ? "active" : ""}" data-tab="player">ПЛЕЕР</button></nav><div class="top-actions"><button class="icon-button" id="addVideoTop" title="Добавить ролик" aria-label="Добавить ролик">${icon("circlePlus")}</button><button class="icon-button" data-tab="settings" title="Настройки" aria-label="Настройки">⚙</button></div></header>${content}<footer class="statusbar"><b id="versionLabel" class="version-label${state.updateAvailable ? " has-update" : ""}" title="${state.updateAvailable ? "Доступно обновление v" + state.updateAvailable.version : ""}">v${escapeHtml(info.version || "?")}${state.updateAvailable ? `<span class="update-badge">!</span>` : ""}</b> · переносная библиотека · ${escapeHtml(info.dataDirectory || "")}</footer></section>`;
   }
 
   function renderTreeNode(node, depth = 0) {
@@ -1230,8 +1234,63 @@
     else if (progress.stage === "transcription-start") showToast("Видео загружено. Запускаю faster-whisper…");
     else showToast(`Распознано ${progress.percent}%…`);
   });
+  async function checkForUpdateOnStart() {
+    try {
+      const result = await window.appAPI.checkForUpdates();
+      if (result.status === "available") {
+        state.updateAvailable = result;
+        render();
+        setTimeout(showUpdateDialog, 800);
+      }
+    } catch {}
+  }
+  async function showUpdateDialog() {
+    if (!state.updateAvailable) return;
+    const info = state.updateAvailable;
+    const backdrop = document.createElement("div");
+    backdrop.className = "dialog-backdrop";
+    backdrop.innerHTML = `<section class="dialog-card update-dialog" role="dialog" aria-modal="true"><h2>Доступно обновление v${escapeHtml(info.version)}</h2><div class="update-body"><p>${escapeHtml(info.body || "Нет описания.").replace(/\n/g, "<br>")}</p></div><div class="form-actions"><button type="button" class="primary" id="updateConfirmBtn">Обновить</button><button type="button" class="subtle-button" data-cancel>Позже</button></div></section>`;
+    const finish = () => { backdrop.remove(); };
+    backdrop.addEventListener("click", event => { if (event.target === backdrop) finish(); });
+    backdrop.querySelector("[data-cancel]").addEventListener("click", finish);
+    backdrop.querySelector("#updateConfirmBtn").addEventListener("click", async () => {
+      backdrop.querySelector("#updateConfirmBtn").disabled = true;
+      backdrop.querySelector("#updateConfirmBtn").textContent = "Скачивание…";
+      const unsub = window.appAPI.onDownloadProgress(progress => {
+        state.updateProgress = progress;
+        backdrop.querySelector("#updateConfirmBtn").textContent = "Скачивание " + progress + "%";
+      });
+      const result = await window.appAPI.downloadUpdate();
+      unsub();
+      if (result.ok) {
+        backdrop.querySelector("#updateConfirmBtn").textContent = "Установка…";
+        await window.appAPI.installUpdate();
+      } else {
+        backdrop.querySelector("#updateConfirmBtn").disabled = false;
+        backdrop.querySelector("#updateConfirmBtn").textContent = "Ошибка. Попробовать ещё раз";
+        showToast("Ошибка скачивания: " + result.reason);
+      }
+    });
+    document.body.append(backdrop);
+  }
+    function renderStatusBar() {
+    const versionEl = document.querySelector("#versionLabel");
+    if (!versionEl) return;
+    versionEl.classList.toggle("has-update", !!state.updateAvailable);
+    const badge = versionEl.querySelector(".update-badge");
+    if (state.updateAvailable && !badge) {
+      const b = document.createElement("span");
+      b.className = "update-badge";
+      b.textContent = "!";
+      versionEl.append(b);
+    } else if (!state.updateAvailable && badge) {
+      badge.remove();
+    }
+  }
   window.addEventListener("beforeunload", saveCurrentPlayerPosition);
   document.addEventListener("click", event => { if (!event.target.closest(".context-menu")) closeContextMenu(); });
+    document.querySelector("#versionLabel")?.addEventListener("click", showUpdateDialog);
   document.addEventListener("keydown", event => { if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return; if (state.activeTab !== "player") return; if (event.code === "Space") { event.preventDefault(); playerCommand("play"); } if (event.key === "ArrowLeft") playerCommand("back"); if (event.key === "ArrowRight") playerCommand("forward"); if (event.key === "[") playerCommand("rate", .75); if (event.key === "]") playerCommand("rate", 1.25); if (event.key.toLowerCase() === "r") playerCommand("repeat"); });
-  Promise.all([window.appAPI.getInfo(), window.appAPI.getLibrary(), window.appAPI.getLibraries(), window.appAPI.getLibraryPreferences(), window.appAPI.getSettings()]).then(async ([info, library, libraries, libraryPreferencesById, settings]) => { state.info = info; state.library = library; state.libraries = libraries; state.libraryPreferencesById = libraryPreferencesById; state.expandedLibraryId = libraries.activeId; state.settings = settings; await offerDefaultLibrary(); render(); }).catch(error => { app.textContent = `Не удалось загрузить приложение: ${error.message}`; });
+  Promise.all([window.appAPI.getInfo(), window.appAPI.getLibrary(), window.appAPI.getLibraries(), window.appAPI.getLibraryPreferences(), window.appAPI.getSettings()]).then(async ([info, library, libraries, libraryPreferencesById, settings]) => { state.info = info; state.library = library; state.libraries = libraries; state.libraryPreferencesById = libraryPreferencesById; state.expandedLibraryId = libraries.activeId; state.settings = settings; await offerDefaultLibrary();
+    checkForUpdateOnStart(); render(); }).catch(error => { app.textContent = `Не удалось загрузить приложение: ${error.message}`; });
 })();

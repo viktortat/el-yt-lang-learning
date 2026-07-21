@@ -17,6 +17,10 @@ const {
 const APP_NAME = "YT Lang Learning";
 const APP_VERSION = app.getVersion();
 const APP_TITLE = `${APP_NAME} v${APP_VERSION}`;
+const GITHUB_REPO = "viktortat/el-yt-lang-learning";
+const GITHUB_API = "https://api.github.com";
+
+const updateState = { available: null, downloading: false, downloadedPath: "", downloadProgress: 0 };
 
 let mainWindow;
 let library;
@@ -31,6 +35,8 @@ app.setPath("userData", userDataDirectory);
 app.commandLine.appendSwitch("disk-cache-dir", path.join(userDataDirectory, "Cache"));
 
 const singleInstanceLock = app.requestSingleInstanceLock();
+
+const updateDirectory = path.join(userDataDirectory, "updates");
 if (!singleInstanceLock) app.quit();
 
 function dataDirectory() {
@@ -683,6 +689,23 @@ async function startRendererServer() {
   return rendererServer.url;
 }
 
+async function checkForUpdates() {
+  try {
+    const url = `${GITHUB_API}/repos/${GITHUB_REPO}/releases/latest`;
+    const response = await fetch(url, { headers: { Accept: "application/vnd.github.v3+json", "User-Agent": APP_NAME } });
+    if (!response.ok) { logDiagnostic(`update check HTTP ${response.status}`); return null; }
+    const release = await response.json();
+    const tag = String(release.tag_name || "").replace(/^v/, "");
+    if (!tag) return null;
+    const latest = tag.split(".").map(Number);
+    const current = APP_VERSION.split(".").map(Number);
+    const isNewer = latest.some((n, i) => n > (current[i] || 0));
+    if (!isNewer) return null;
+    const asset = (release.assets || []).find(a => /-setup\.exe$/i.test(a.name));
+    return { version: tag, body: String(release.body || "").trim(), releaseUrl: release.html_url, asset: asset || null };
+  } catch (error) { logDiagnostic(`update check error: ${error.message}`); return null; }
+}
+
 async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -723,7 +746,9 @@ if (require("electron-squirrel-startup")) {
 } else {
   app.whenReady().then(async () => {
     await loadData();
-    logDiagnostic(`start ${APP_VERSION}`);
+  logDiagnostic(`start ${APP_VERSION}`);
+  const checkResult = await checkForUpdates();
+  if (checkResult) { updateState.available = checkResult; logDiagnostic(`update available: ${checkResult.version}`); }
 
     ipcMain.handle("app:get-info", () => ({ version: APP_VERSION, dataDirectory: dataDirectory() }));
     ipcMain.handle("youtube:get-metadata", async (_event, url) => {
@@ -902,6 +927,70 @@ if (require("electron-squirrel-startup")) {
       result.translation.hasApiKey = false;
       return result;
     });
+
+    ipcMain.handle("update:check", async () => {
+      if (updateState.available) return { status: "available", version: updateState.available.version, body: updateState.available.body };
+      const result = await checkForUpdates();
+      if (result) updateState.available = result;
+      return result ? { status: "available", version: result.version, body: result.body } : { status: "current" };
+    });
+    ipcMain.handle("update:get-status", () => ({
+      downloading: updateState.downloading,
+      downloadProgress: updateState.downloadProgress,
+      downloadedPath: updateState.downloadedPath,
+      available: updateState.available ? { version: updateState.available.version } : null
+    }));
+    ipcMain.handle("update:download", async event => {
+      if (!updateState.available || updateState.downloading) return { ok: false, reason: updateState.downloading ? "already-downloading" : "no-update" };
+      updateState.downloading = true;
+      updateState.downloadProgress = 0;
+      try {
+        const asset = updateState.available.asset;
+        if (!asset) throw new Error("Ассет установщика не найден");
+        const fileName = asset.name;
+        const filePath = path.join(updateDirectory, fileName);
+        mkdirSync(updateDirectory, { recursive: true });
+        const response = await fetch(asset.browser_download_url);
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const contentLength = Number(response.headers.get("content-length") || 0);
+        const reader = response.body.getReader();
+        const chunks = [];
+        let received = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.length;
+          if (contentLength > 0) {
+            updateState.downloadProgress = Math.round((received / contentLength) * 100);
+            event.sender.send("update:download-progress", updateState.downloadProgress);
+          }
+        }
+        const buffer = Buffer.concat(chunks);
+        await writeFile(filePath, buffer);
+        updateState.downloadedPath = filePath;
+        updateState.downloadProgress = 100;
+        event.sender.send("update:download-progress", 100);
+        return { ok: true, filePath };
+      } catch (error) {
+        logDiagnostic("update download error: " + error.message);
+        return { ok: false, reason: error.message };
+      } finally {
+        updateState.downloading = false;
+      }
+    });
+    ipcMain.handle("update:install", async () => {
+      if (!updateState.downloadedPath) return { ok: false, reason: "no-file" };
+      try {
+        const { spawn } = require("child_process");
+        spawn(updateState.downloadedPath, [], { detached: true, stdio: "ignore" }).unref();
+        app.quit();
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, reason: error.message };
+      }
+    });
+
 
     await createWindow();
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

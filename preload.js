@@ -40,5 +40,14 @@ contextBridge.exposeInMainWorld("appAPI", {
   },
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: payload => ipcRenderer.invoke("settings:save", payload),
-  getDefaultSettings: () => ipcRenderer.invoke("settings:defaults")
+  getDefaultSettings: () => ipcRenderer.invoke("settings:defaults"),
+  checkForUpdates: () => ipcRenderer.invoke("update:check"),
+  getUpdateStatus: () => ipcRenderer.invoke("update:get-status"),
+  downloadUpdate: () => ipcRenderer.invoke("update:download"),
+  installUpdate: () => ipcRenderer.invoke("update:install"),
+  onDownloadProgress: callback => {
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on("update:download-progress", listener);
+    return () => ipcRenderer.removeListener("update:download-progress", listener);
+  }
 });
