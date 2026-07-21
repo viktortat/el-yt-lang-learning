@@ -2607,6 +2607,28 @@
           }
         ],
         "playlistUrl": "https://www.youtube.com/playlist?list=PLs7zUO7VPyJ5razSfhOUVbTv9q6SAuPx-"
+      },
+      {
+        "id": "video-mruoi7td-1nkpo",
+        "type": "video",
+        "name": "Spaniens Triumph: Musste Argentinien scheitern?",
+        "url": "https://www.youtube.com/watch?v=wox30Qrx3cI",
+        "createdAt": "2026-07-21T13:17:59.185Z",
+        "progress": {
+          "studied": 0,
+          "position": 0
+        }
+      },
+      {
+        "id": "video-mruow51d-7qh57",
+        "type": "video",
+        "name": "Was wir über den aktuellen Zustand des russischen Militärs wissen | DW Nachrichten",
+        "url": "https://www.youtube.com/watch?v=kdmffbaRBDo",
+        "createdAt": "2026-07-21T13:28:48.769Z",
+        "progress": {
+          "studied": 0,
+          "position": 0
+        }
       }
     ]
   }
