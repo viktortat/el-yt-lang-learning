@@ -1,10 +1,58 @@
 {
-  "version": 1,
+  "version": 2,
+  "preferences": {
+    "studyLanguage": "en",
+    "translationLanguage": "ru",
+    "translationInstruction": ""
+  },
   "root": {
     "id": "root",
     "type": "folder",
     "name": "Главная",
     "children": [
+      {
+        "id": "folder-mrt0jlol-5ufvy",
+        "type": "folder",
+        "name": "News",
+        "children": [
+          {
+            "id": "folder-mrt0jddh-085wr",
+            "type": "folder",
+            "name": "CNN",
+            "children": [
+              {
+                "id": "video-mrt0iy5n-z4sfz",
+                "type": "video",
+                "name": "Newly declassified docs don't support Trump's election claims",
+                "url": "https://www.youtube.com/watch?v=o7wiKHdef1g",
+                "createdAt": "2026-07-20T09:18:56.363Z",
+                "progress": {
+                  "studied": 0,
+                  "position": 0
+                }
+              }
+            ]
+          },
+          {
+            "id": "folder-mrt03sv0-4n1ay",
+            "type": "folder",
+            "name": "BBC News",
+            "children": [
+              {
+                "id": "video-mrt01dmw-bh527",
+                "type": "video",
+                "name": "Ukraine strike Russian online retail warehouses | BBC News",
+                "url": "https://www.youtube.com/watch?v=kjyOmZQQr6A",
+                "createdAt": "2026-07-20T09:05:16.616Z",
+                "progress": {
+                  "studied": 0,
+                  "position": 0
+                }
+              }
+            ]
+          }
+        ]
+      },
       {
         "id": "video-mrrwk9o2-n8nwr",
         "type": "video",
@@ -124,49 +172,6 @@
               "studied": 0,
               "position": 0
             }
-          }
-        ]
-      },
-      {
-        "id": "folder-mrt0jlol-5ufvy",
-        "type": "folder",
-        "name": "News",
-        "children": [
-          {
-            "id": "folder-mrt0jddh-085wr",
-            "type": "folder",
-            "name": "CNN",
-            "children": [
-              {
-                "id": "video-mrt0iy5n-z4sfz",
-                "type": "video",
-                "name": "Newly declassified docs don't support Trump's election claims",
-                "url": "https://www.youtube.com/watch?v=o7wiKHdef1g",
-                "createdAt": "2026-07-20T09:18:56.363Z",
-                "progress": {
-                  "studied": 0,
-                  "position": 0
-                }
-              }
-            ]
-          },
-          {
-            "id": "folder-mrt03sv0-4n1ay",
-            "type": "folder",
-            "name": "BBC News",
-            "children": [
-              {
-                "id": "video-mrt01dmw-bh527",
-                "type": "video",
-                "name": "Ukraine strike Russian online retail warehouses | BBC News",
-                "url": "https://www.youtube.com/watch?v=kjyOmZQQr6A",
-                "createdAt": "2026-07-20T09:05:16.616Z",
-                "progress": {
-                  "studied": 0,
-                  "position": 0
-                }
-              }
-            ]
           }
         ]
       },
